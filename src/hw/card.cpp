@@ -18,7 +18,7 @@ bool Card::file_exists(const char* path)
     return f_stat(path, &fno) == FR_OK && fno.fsize > 0; 
 }
 
-void Card::init_read_audio(const AudioData data) 
+void Card::init_read_audio(AudioData data) 
 {   
     if (_state != State::idle) return;
 
@@ -37,7 +37,7 @@ void Card::init_read_audio(const AudioData data)
     }
     
     if (f_read(&_sdfile, _buffer, kChunk, &bytesread) != FR_OK
-    || !wav_header(_buffer, kChunk, hdr, hdr_size)) {
+    || !wav_header(_buffer, data.cue_points, kChunk, hdr, hdr_size, data.cue_count)) {
         _state = State::failed;
         _close_file();
         return;
@@ -51,19 +51,22 @@ void Card::init_read_audio(const AudioData data)
         && hdr.DataSize > 0) {
             _offset = 0;
             _bytes = data.body;
-            _size = std::min(data.body_size, (size_t)hdr.DataSize);
+            _slices = data.cue_points;
+            _slice_count = data.cue_count;
+            _hdr_size = hdr_size;
+            _audio_size = std::min(data.body_size, (size_t)hdr.DataSize);
             _state = State::read_audio;        
     }
     else {
         _state = State::failed;
         _close_file();      
     }
-
     if (f_lseek(&_sdfile, hdr_size) != FR_OK) {
         _state = State::failed;
         _close_file();
     }
 }
+
 void Card::read_audio()
 {
     if (_state != State::read_audio) {
@@ -77,13 +80,31 @@ void Card::read_audio()
         return;
     }
 
-    auto buf_len = std::min(_size - _offset, bytesread);
+    auto buf_len = std::min(_audio_size - _offset, bytesread);
     std::memcpy(&_bytes[_offset], _buffer, buf_len);
-
+    
     _offset += buf_len;
-    _size_read_audio = _offset / 8; // (2 channels * 4 bytes)
+    _size_read_audio = _offset * .125f; // 1 / (2 channels * 4 bytes)
 
     if (bytesread < kChunk || buf_len < bytesread) {
+        if (f_lseek(&_sdfile, _hdr_size + _audio_size) == FR_OK 
+         && f_read(&_sdfile, _buffer, kChunk, &bytesread) == FR_OK) {
+            find_cue_points(
+                _buffer,
+                _slices,
+                _slice_count,
+                bytesread
+            );
+            auto end_idx = (int32_t)*_slice_count - 1;
+            if (end_idx >= 0 && end_idx < 31 && _slices[end_idx] < _audio_size) {
+                _slices[end_idx + 1] = _size_read_audio;
+                *_slice_count += 1;
+            }
+            for (auto i = 0; i < *_slice_count; i++) {
+                uint32_t slice = _slices[i];
+                volatile auto b = 1;
+            }
+        }
         _notify_finish_processing = true;
         _state = State::idle;
         _close_file();
@@ -119,7 +140,7 @@ void Card::init_write_audio(const AudioData data)
     uint32_t byteswritten;
     if (f_write(&_sdfile, data.header, data.header_size, (UINT*)&byteswritten) == FR_OK) {
         _bytes = (uint8_t*)data.body;
-        _size = data.body_size;
+        _audio_size = data.body_size;
         _offset = 0;
         _state = State::write_audio;
     }
@@ -134,7 +155,7 @@ void Card::write_audio()
     if (_state != State::write_audio) {
         return;
     }
-    if (_offset >= _size) {
+    if (_offset >= _audio_size) {
         _notify_finish_processing = true;
         _state = State::idle;
         _close_file();
@@ -142,7 +163,7 @@ void Card::write_audio()
     }
     
     uint32_t byteswritten;
-    auto write_len = std::min(_size - _offset, kChunk);
+    auto write_len = std::min(_audio_size - _offset, kChunk);
     if (f_write(&_sdfile, &_bytes[_offset], write_len, (UINT*)&byteswritten) != FR_OK) {
         _state = State::failed;
         _close_file();

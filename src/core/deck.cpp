@@ -245,7 +245,7 @@ void Deck::tick(const bool common_tick, const bool is_key)
     if (e != nullptr && e->on && (!_generator.is_suspended() || !_generator.is_generating())) {
         auto hold = true;
         if (_mode == Mode::Slice) {
-            hold = _track.is_empty() && common_tick;
+            hold = _force_mono || (_track.is_empty() && common_tick);
         }
         _dispatcher.event_on(e, hold);
     }
@@ -263,6 +263,7 @@ void Deck::set_start(const float val)
 void Deck::_set_start() 
 {
     _generator.set_start(_norm_start);
+    _set_size();
 }
 void Deck::set_start_mod_on(const bool on)
 {
@@ -274,6 +275,7 @@ void Deck::start_mod_in(const float val)
     if (!_start_mod_on) return;
     auto norm_start_mod = std::abs(val) < 0.01 ? 0 : val;
     _generator.set_start_offset(norm_start_mod);
+    _set_size();
 }
 
 // Size /////////////////////////////////////////
@@ -285,7 +287,7 @@ float Deck::norm_size(const bool incl_mod) const {
             else return std::round(std::max(_norm_size * _max_loop_ticks, 1.f)) / _max_loop_ticks;
         
         default: 
-            auto size = _norm_size * _norm_size;
+            auto size = _generator.size() / _buffer.rec_size();
             return incl_mod ? size + _norm_size_mod : size;
     }
 }
@@ -316,7 +318,8 @@ void Deck::_set_size()
 {
     switch (_mode) {
         case Mode::Slice:
-            _quantize_loop(_norm_size);
+            _generator.set_size(_norm_size);
+            _quantize_loop(_generator.size() / _buffer.rec_size());
             _generator.set_size(std::max(_norm_size, norm_size(false)));
             break;
 

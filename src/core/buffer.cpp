@@ -9,23 +9,25 @@ using namespace spotykach;
 
 Buffer::Buffer():
 _buffer         { nullptr },
-_buffer_size  { 0 },
+_buffer_size    { 0 },
 _feedback       { 0.95 }, //-3dB
-_size         { 0 },
+_size           { 0 },
 _write_head     { 0 },
 _read_head      { 0 },
 _fade_counter   { 0 },
 _state          { State::idle }
-{}
+{};
 
-void Buffer::init(Frame* buf, size_t length) {
+void Buffer::init(Frame* buf, size_t length) 
+{
     _buffer = buf;
     _buffer_size = length;
     _buffer_size_kof = 1.f / length;
     _cut_switch.init(48000);
 };
 
-void Buffer::set_recording(const bool is_rec_on) {
+void Buffer::set_recording(const bool is_rec_on) 
+{
     switch (_state) {
         case State::idle: 
             if (is_rec_on) {
@@ -46,16 +48,17 @@ void Buffer::set_recording(const bool is_rec_on) {
     }
 };
 
-void Buffer::set_feedback(const float val) { 
+void Buffer::set_feedback(const float val) 
+{ 
     auto dbfs = 60.f * (val - 1.f);
     _feedback = daisysp::pow10f(dbfs * 0.05f);
-}
+};
 
 void Buffer::set_rec_size(const size_t value)
 {
     _size = value;
     cut();
-}
+};
 
 void Buffer::cut()
 {
@@ -63,13 +66,14 @@ void Buffer::cut()
     _cut_switch.set_on(true);
     _did_cut = true;
     _write_head = 0;
-}
+};
+
 bool Buffer::read_reset_did_cut()
 {
     if (!_did_cut) return false;
     _did_cut = false;
     return true;
-}
+};
 
 void Buffer::clear() 
 {
@@ -103,9 +107,8 @@ void Buffer::read_linear(float frame, float& out0, float& out1)
     _read(next_fr, n0, n1);
 
     out0 = a0 + frac_fr * (n0 - a0);
-    out1 = a1 + frac_fr * (n1 - a1);
-    
-}
+    out1 = a1 + frac_fr * (n1 - a1);  
+};
 
 void Buffer::read_cubic(float frame, float& out0, float& out1) 
 {
@@ -155,7 +158,7 @@ void Buffer::read_cubic(float frame, float& out0, float& out1)
     // Interpolate
     out0 = (((c3_0 * frac_fr + c2_0) * frac_fr + c1_0) * frac_fr + c0_0);
     out1 = (((c3_1 * frac_fr + c2_1) * frac_fr + c1_1) * frac_fr + c0_1);
-}
+};
 
 void Buffer::_read(size_t frame, float& out0, float& out1) {
     frame %= _size;
@@ -166,7 +169,8 @@ void Buffer::_read(size_t frame, float& out0, float& out1) {
     _read_head = frame;
 };
 
-void Buffer::write(const float in0, const float in1) {
+void Buffer::write(const float in0, const float in1) 
+{
     auto fade = 1.f;
     switch (_state) {
         case State::idle: return;

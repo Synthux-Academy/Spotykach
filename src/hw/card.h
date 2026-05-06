@@ -30,6 +30,8 @@ class Card
       char* deck_dir;
       char* tape_dir;
       char* file_name;
+      size_t* cue_points;
+      uint8_t* cue_count;
     };
 
     Card();
@@ -37,8 +39,8 @@ class Card
 
     State state() const { return _state; };
     float progress() const { 
-      if (_size == 0) return 0.f;
-      return std::clamp(static_cast<float>(_offset) / _size, 0.f, 1.f); 
+      if (_audio_size == 0) return 0.f;
+      return std::clamp(static_cast<float>(_offset) / _audio_size, 0.f, 1.f); 
     }
 
     void init(uint8_t* buffer);
@@ -49,7 +51,7 @@ class Card
 
     bool file_exists(const char* path);
 
-    void init_read_audio(const AudioData data);
+    void init_read_audio(AudioData data);
     void read_audio();
     size_t size_audio() const { return _size_read_audio; }
 
@@ -75,9 +77,12 @@ class Card
 
     uint8_t*  _buffer;
     uint8_t*  _bytes;
-    size_t    _size;
+    size_t*   _slices;
+    size_t    _audio_size;
+    size_t    _hdr_size;
     size_t    _offset;
     size_t    _size_read_audio;
+    uint8_t*  _slice_count;
 
     bool _notify_finish_processing;
 };

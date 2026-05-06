@@ -62,9 +62,12 @@ size_t Generator::_abs_start()
   while (start < 0.f) start += 1.f;
   auto buffer_size = _buffer->rec_size();
   auto abs_start = 0;
-  if (_snap_to_slice) {
+  if (_snap_to_slice || _slice_points_count > 0) {
     abs_start = _snap(start);
     _input_start = buffer_size > 0 ? static_cast<float>(abs_start) / buffer_size : 0;  
+    if (_slice_points_count > 0) {
+      _apply_size();
+    }
   }
   else {
     abs_start = start * buffer_size;
@@ -80,7 +83,7 @@ void Generator::_apply_start()
 
 void Generator::set_size(float norm) 
 {
-  if (!_snap_to_slice) norm *= norm;
+  if (!_snap_to_slice && _slice_points_count == 0) norm *= norm;
   _norm_size = std::clamp(norm, 0.f, 1.f);
 
   auto abs_size = _abs_size();
@@ -89,9 +92,7 @@ void Generator::set_size(float norm)
     v.set_size(abs_size);
     v.set_full_size(full_size);
   }
-
-  auto size = static_cast<size_t>(norm * full_size);
-  _input_size = std::max(size, kSliceMinSize);
+  _input_size = std::max(abs_size, kSliceMinSize);
 }
 void Generator::set_size_offset(const float offset) 
 {
@@ -103,16 +104,30 @@ void Generator::set_size_offset(const float offset)
 }
 size_t Generator::_abs_size()
 {
-  auto base = static_cast<int32_t>(_buffer->rec_size());
-  auto min_size = static_cast<int32_t>(kSliceMinSize);
+  volatile auto size = static_cast<int32_t>(_buffer->rec_size());
+  volatile auto min_size = static_cast<int32_t>(kSliceMinSize);
   auto norm_size = std::clamp((_norm_size + _norm_size_offset) * 1.05f, 0.f, 1.f);
-  auto size = static_cast<int32_t>(norm_size * base);
+
+  if (_slice_points_count > 0) {
+    auto base = _slice_points_count - 1;
+    volatile auto start_idx = static_cast<size_t>(_input_start * base);
+    volatile auto end_idx = static_cast<size_t>(std::round((norm_size + _input_start) * base));
+    if (end_idx == start_idx) end_idx += 1;
+    if (end_idx >= _slice_points_count) end_idx -= _slice_points_count;
+    volatile auto start = _slice_points[start_idx];
+    volatile auto end = _slice_points[end_idx];
+    if (end < start) end += size;
+    size = end - start;
+  }
+  else {
+    size = static_cast<int32_t>(norm_size * size);
+  }
   return std::max(size, min_size);
 }
 void Generator::_apply_size()
 {
-  auto size = _abs_size();
-  for (auto& v: _voxs) v.set_size(size);
+  _input_size = _abs_size();
+  for (auto& v: _voxs) v.set_size(_input_size);
 }
 
 void Generator::slice() 
@@ -137,13 +152,13 @@ void Generator::clear_slices()
 }
 size_t Generator::_snap(const float norm_value) 
 {
-  if (_is_auto_slice) {
-    auto idx = static_cast<size_t>(std::round(_auto_slice_max_idx * norm_value));
-    return _slice_size * idx;
+  if (_slice_points_count > 0) {
+    auto idx = static_cast<size_t>(std::round(norm_value * (_slice_points_count - 1)));
+    return _slice_points[idx];
   }
   else {
-    auto point = static_cast<uint8_t>(norm_value * (_slice_points_count - 1));
-    return _slice_points[point];
+    auto idx = static_cast<size_t>(std::round(_auto_slice_max_idx * norm_value));
+    return _slice_size * idx;
   }
 }
 

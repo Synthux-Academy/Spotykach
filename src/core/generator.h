@@ -52,6 +52,8 @@ public:
   void auto_slice(const size_t slice_size, const size_t slice_count);
   void clear_slices();
   void set_snap_to_slice(const bool value) { _snap_to_slice = value; }
+  size_t* slices() const { return _slice_points; }
+  uint8_t* slice_count() { return &_slice_points_count; }
 
   float increment() const { return _increment; }
 
