@@ -55,7 +55,7 @@ void Generator::set_start_offset(const float value)
   _norm_start_offset = value;
   if (_cont_start_mod) _apply_start();
 };
-size_t Generator::_abs_start() 
+size_t Generator::_get_abs_start() 
 {
   auto start = _norm_start + _norm_start_offset;
   while (start > 1.f) start -= 1.f;
@@ -77,7 +77,7 @@ size_t Generator::_abs_start()
 }
 void Generator::_apply_start()
 {
-  auto abs_start = _abs_start();
+  auto abs_start = _get_abs_start();
   for (auto& v: _voxs) v.set_start(abs_start);
 }
 
@@ -86,7 +86,7 @@ void Generator::set_size(float norm)
   if (!_snap_to_slice && _slice_points_count == 0) norm *= norm;
   _norm_size = std::clamp(norm, 0.f, 1.f);
 
-  auto abs_size = _abs_size();
+  auto abs_size = _get_abs_size();
   auto full_size = _buffer->rec_size();
   for (auto& v: _voxs) {
     v.set_size(abs_size);
@@ -102,7 +102,7 @@ void Generator::set_size_offset(const float offset)
     case Vox::Mode::Linear: _apply_size(); break;
   }
 }
-size_t Generator::_abs_size()
+size_t Generator::_get_abs_size()
 {
   volatile auto size = static_cast<int32_t>(_buffer->rec_size());
   volatile auto min_size = static_cast<int32_t>(kSliceMinSize);
@@ -126,7 +126,7 @@ size_t Generator::_abs_size()
 }
 void Generator::_apply_size()
 {
-  _input_size = _abs_size();
+  _input_size = _get_abs_size();
   for (auto& v: _voxs) v.set_size(_input_size);
 }
 
@@ -261,11 +261,11 @@ void Generator::trigger(const uint8_t vox_idx, const Event* event)
 
   // TODO: define override order, something like knob-over-cv-over-MIDI-over-event.
   if (event->p1_on) { _norm_start = event->p1; }
-  if (!_cont_start_mod) v.set_start(_abs_start());
+  if (!_cont_start_mod) v.set_start(_get_abs_start());
 
   if (event->p2_on) { 
     _norm_size = event->p2;
-    v.set_size(_abs_size());
+    v.set_size(_get_abs_size());
   }
 
   /* gate in / midi / track */ 

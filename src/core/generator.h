@@ -101,8 +101,8 @@ protected:
 private:
   NOCOPY(Generator)
 
-  size_t _abs_start();
-  size_t _abs_size();
+  size_t _get_abs_start();
+  size_t _get_abs_size();
   size_t _abs_spread();
   size_t _snap(const float norm_value);
 
