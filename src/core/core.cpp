@@ -94,7 +94,7 @@ void Core::infer_panner_mode()
 
 void Core::prepare() 
 {
-    
+    for (auto& d: _decks) d.prepare();
 }
 
 void Core::process(const float* const* in, float** out, size_t size) 

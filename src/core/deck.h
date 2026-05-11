@@ -46,6 +46,8 @@ public:
 
     void init(const Params p);
 
+    void prepare();
+
     void process_out(const float in0, const float in1, float& out0, float& out1);
     void process_in(const float in0, const float in1);
 
@@ -76,13 +78,11 @@ public:
     void set_start_mod_on(const bool);
 
     float norm_size() const;
-    void set_size(const float);
+    void set_size(const float, const bool alt);
     void set_size_mod(const float);
     void set_size_mod_on(const bool);
 
     void set_grid();
-
-    void prepare_processing();
 
     float norm_playhead_at(const uint8_t idx) const;
     float envelope_at(const uint8_t idx) const { return _generator.envelope_at(idx); };
@@ -172,5 +172,6 @@ private:
     bool _length_mod_on;
     bool _is_cut_queued;
     bool _force_mono;
+    bool _alt_size;
 };
 };

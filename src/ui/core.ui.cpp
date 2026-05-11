@@ -112,8 +112,8 @@ void CoreUI::process()
 
     auto& deck_a = _core.deck(Deck::A);
     auto& deck_b = _core.deck(Deck::B);
-    auto is_chord_a = deck_a.mode() == Mode::Drift;
-    auto is_chord_b = deck_b.mode() == Mode::Drift;
+    auto is_drift_a = deck_a.mode() == Mode::Drift;
+    auto is_drift_b = deck_b.mode() == Mode::Drift;
 
     auto blink = _arm_blink_timer.HasPassedMs(250);
     if (blink) _arm_blink_timer.Restart();
@@ -148,15 +148,15 @@ void CoreUI::process()
         }
     }
     if (_apply.test(Hardware::CTRL_ENV_A)) {
-        if (is_chord_a) deck_a.set_size(_env_size[Deck::A].value());
+        if (is_drift_a) deck_a.set_size(_env_size[Deck::A].value(), false);
         deck_a.voxs().set_shape(_env[Deck::A].value());
     }
     if (_apply.test(Hardware::CTRL_ENV_B)) {
-        if (is_chord_b) deck_b.set_size(_env_size[Deck::B].value());
+        if (is_drift_b) deck_b.set_size(_env_size[Deck::B].value(), false);
         deck_b.voxs().set_shape(_env[Deck::B].value());
     }
     if (_apply.test(Hardware::CTRL_SIZE_A)) {
-        if (is_chord_a) {
+        if (is_drift_a) {
             deck_a.voxs().set_win_size(_win[Deck::A].value());
             deck_a.voxs().set_win_spread(_size[Deck::A].value());
         }
@@ -164,11 +164,11 @@ void CoreUI::process()
             deck_a.set_force_mono((1.f - _poly_slice[Deck::A].value()) > .5f);
         }
         else {
-            deck_a.set_size(_size[Deck::A].value());
+            deck_a.set_size(_size[Deck::A].value(), _touched.test(Alt));
         }
     }
     if (_apply.test(Hardware::CTRL_SIZE_B)) {
-        if (is_chord_b) {
+        if (is_drift_b) {
             deck_b.voxs().set_win_size(_win[Deck::B].value());
             deck_b.voxs().set_win_spread(_size[Deck::B].value());
         }
@@ -176,7 +176,7 @@ void CoreUI::process()
             deck_b.set_force_mono((1.f - _poly_slice[Deck::B].value()) > .5f);
         }
         else {
-            deck_b.set_size(_size[Deck::B].value());
+            deck_b.set_size(_size[Deck::B].value(), _touched.test(Alt));
         }
     }
     if (_apply.test(Hardware::CTRL_PITCH_A)) {

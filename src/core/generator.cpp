@@ -70,13 +70,12 @@ void Generator::apply_dimensions(const bool size_to_slice)
   auto norm_start = _norm_start + _norm_start_offset;
   while (norm_start > 1.f) norm_start -= 1.f;
   while (norm_start < 0.f) norm_start += 1.f;
-  norm_start = std::clamp(norm_start, 0.f, 1.f);
   
   auto norm_size = std::clamp((_norm_size + _norm_size_offset) * 1.05f, 0.f, 1.f);
   auto buffer_size = _buffer->rec_size();
   auto abs_size = norm_size * buffer_size;
   
-  if (_slice_points_count) { /* pre-sliced */
+  if (_slice_points_count > 0) { /* pre-sliced */
     auto last_point_idx = _slice_points_count - 1;
     auto start_idx = static_cast<size_t>(std::round(norm_start * last_point_idx));
     abs_start = _slice_points[start_idx];
@@ -90,8 +89,8 @@ void Generator::apply_dimensions(const bool size_to_slice)
       abs_size = abs_end - _abs_start;
     }
   }
-  else if (_is_auto_slice) { /* slice mode */
-    abs_start = _slice_size * std::round(norm_size * _auto_slice_max_idx);
+  else if (_snap_to_slice) { /* slice mode */
+    abs_start = _slice_size * std::round(norm_start * _auto_slice_max_idx);
   }
   else { /* reel & drift */
     abs_start = norm_start * buffer_size; 
@@ -201,7 +200,6 @@ void Generator::set_win_size(const float norm)
 void Generator::set_win_spread(const float norm)
 {
   _norm_spread = norm;
-  _apply_spread();
 }
 size_t Generator::_abs_spread() 
 {
