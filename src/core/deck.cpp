@@ -12,8 +12,6 @@ _pattern_divider     { Divider(kPPQNIntern, Every::_32th) },
 _tempo               { 0.43f },
 _record_tempo        { 0.f },
 _start_step_kof      { 1.f },
-_norm_size           { 1.f },
-_norm_size_mod       { 0.f },
 _size_mod_on         { false },
 _in_out_mix          { .5f },
 _in_out_mix_offset   { 0.f },
@@ -91,7 +89,6 @@ void Deck::_set_mode(const Mode new_mode)
             g.set_snap_to_slice(false);
             g.set_cont_start_mod(true);
             g.set_cont_pitch_mod(true);
-            _set_size();
             if (_needs_kickstart()) _dispatch();
             break;
 
@@ -105,8 +102,7 @@ void Deck::_set_mode(const Mode new_mode)
             g.set_snap_to_slice(true);
             g.set_cont_start_mod(false);
             g.set_cont_pitch_mod(false);
-            _set_grid();
-            _set_size();
+            set_grid();
             _resolve_playhead();
             break;
         
@@ -119,7 +115,6 @@ void Deck::_set_mode(const Mode new_mode)
             g.set_snap_to_slice(false);
             g.set_cont_start_mod(true);
             g.set_cont_pitch_mod(true);
-            _set_size();
             break;
 
         case Mode::None: break;
@@ -168,7 +163,6 @@ void Deck::_set_buf_armed(const bool on)
     }
     else if (_mode == Mode::Reel || _mode == Mode::Drift) {
         _stop_recording();
-        _set_size();
     }  
 };
 void Deck::_clock_recording() 
@@ -180,8 +174,7 @@ void Deck::_clock_recording()
         else if (_is_record_queued) {
             _is_record_queued = false;
             _is_cut_queued = true;
-            _set_grid(true);
-            _set_size();
+            set_grid();
         }    
     }
     else if (_is_record_queued) {
@@ -195,7 +188,7 @@ void Deck::_start_recording()
 }
 void Deck::_stop_recording() 
 {
-    apply_start_size();
+    set_grid();
     _detector.set_armed(false);
     _buffer.set_recording(false);
 };
@@ -214,8 +207,7 @@ float Deck::tempo_to_fit(const float frac)
     auto bpm = 2880000 * (1 + round(frac * 15)) / _buffer.rec_size();
     _tempo = bpm;
     _record_tempo = bpm;
-    _set_grid(true);
-    _set_size();
+    set_grid();
     return bpm;
 }
 void Deck::tick(const bool common_tick, const bool is_key) 
@@ -251,88 +243,59 @@ void Deck::tick(const bool common_tick, const bool is_key)
     }
 }
 
+// Prepare processing ////////////////////////////
+void Deck::prepare_processing()
+{
+    _generator.apply_dimensions(true);
+    if (_mode == Mode::Slice) _quantize_loop(norm_size());
+}
+
 // Start //////////////////////////////////////////
-float Deck::norm_start() const { 
-    return _generator.start();
+float Deck::norm_start() const 
+{ 
+    if (_buffer.is_empty()) return 0.f;
+    return _generator.start() / _buffer.rec_size();
 }
 void Deck::set_start(const float val)
 {
-    _norm_start = val;
-    _set_start();
-}
-void Deck::_set_start() 
-{
-    _generator.set_start(_norm_start);
-    _set_size();
+    _generator.set_start(val);
 }
 void Deck::set_start_mod_on(const bool on)
 {
-    if (_start_mod_on && !on) start_mod_in(0);
     _start_mod_on = on;
 }
-void Deck::start_mod_in(const float val)
+void Deck::set_start_mod(const float val)
 {
-    if (!_start_mod_on) return;
-    auto norm_start_mod = std::abs(val) < 0.01 ? 0 : val;
+    auto norm_start_mod = 0;
+    if (_start_mod_on) norm_start_mod = std::abs(val) < 0.01 ? 0 : val;
     _generator.set_start_offset(norm_start_mod);
-    _set_size();
 }
 
 // Size /////////////////////////////////////////
-float Deck::norm_size(const bool incl_mod) const {
+float Deck::norm_size() const {
     if (_buffer.is_empty()) return 0.f;
-    switch (_mode) {
-        case Mode::Slice: 
-            if (incl_mod) return static_cast<float>(_loop_ticks) / _max_loop_ticks;
-            else return std::round(std::max(_norm_size * _max_loop_ticks, 1.f)) / _max_loop_ticks;
-        
-        default: 
-            auto size = _generator.size() / _buffer.rec_size();
-            return incl_mod ? size + _norm_size_mod : size;
-    }
+    return _generator.size() / _buffer.rec_size();
 }
-void Deck::set_size(const float norm_size) 
+void Deck::set_size(const float norm) 
 {
-    _norm_size = std::clamp(norm_size, 0.f, 1.f);
-    _set_size();
+    _generator.set_size(norm);
 };
 void Deck::set_size_mod_on(const bool on) 
 { 
-    if (_size_mod_on && !on) size_mod_in(0);
     _size_mod_on = on;
 }
-void Deck::size_mod_in(const float val) 
+void Deck::set_size_mod(const float val) 
 {
-    if (!_size_mod_on) return;
-    _norm_size_mod = std::abs(val) < 0.01 ? 0 : val;
-    _generator.set_size_offset(_norm_size_mod);
-    switch (_mode) {
-        case Mode::Slice:
-            _quantize_loop(std::clamp(_norm_size + _norm_size_mod, 0.f, 1.f));   
-            break;
-
-        default: break;
-    }
+    auto norm_size_mod = 0;
+    if (_size_mod_on) norm_size_mod = std::abs(val) < 0.01 ? 0 : val;
+    _generator.set_size_offset(norm_size_mod);
 }
-void Deck::_set_size()
-{
-    switch (_mode) {
-        case Mode::Slice:
-            _generator.set_size(_norm_size);
-            _quantize_loop(_generator.size() / _buffer.rec_size());
-            _generator.set_size(std::max(_norm_size, norm_size(false)));
-            break;
-
-        default: 
-            _generator.set_size(_norm_size);
-    }
-}
-void Deck::_set_grid(const bool round) 
+void Deck::set_grid()
 {   
     _record_tempo = _tempo;
     if (is_overdubbing()) return;
     auto ticks = _buffer.rec_size() * _tempo / 720000.f; //4PPQN
-    _max_loop_ticks = round ? std::round(ticks) : ticks;
+    _max_loop_ticks = _mode == Mode::Slice ? std::round(ticks) : ticks;
     _loop_tick_count = -1;
     _through_loop_ticks = -1;
     _generator.auto_slice(_start_step_kof / _record_tempo, _max_loop_ticks * .5f); //_max_loop_ticks are in 16ths
@@ -346,13 +309,6 @@ void Deck::_quantize_loop(const float norm_size)
         _adjust_count = true;
     }
     _loop_ticks = loop_ticks;
-}
-
-void Deck::apply_start_size()
-{
-    _set_grid(_mode == Mode::Slice);
-    _set_size();
-    _set_start();
 }
 
 // Play /..////////////////////////////////////////
@@ -455,8 +411,7 @@ void Deck::process_in(const float in0, const float in1)
 
     if (_buffer.read_reset_did_cut() && _buffer.is_recording()) {
         _is_cut_queued = false;
-        _set_grid();
-        _set_size();
+        set_grid();
         switch (_mode) {
             case Mode::Slice: _is_play_queued = true; break;
             default: play(); break;

@@ -66,15 +66,15 @@ void Generator::set_size_offset(const float offset)
 
 void Generator::apply_dimensions(const bool size_to_slice)
 {
+  auto abs_start = 0.f; 
   auto norm_start = _norm_start + _norm_start_offset;
   while (norm_start > 1.f) norm_start -= 1.f;
   while (norm_start < 0.f) norm_start += 1.f;
   norm_start = std::clamp(norm_start, 0.f, 1.f);
+  
   auto norm_size = std::clamp((_norm_size + _norm_size_offset) * 1.05f, 0.f, 1.f);
   auto buffer_size = _buffer->rec_size();
- 
-  float abs_start = 0; 
-  float abs_size = norm_size * buffer_size;
+  auto abs_size = norm_size * buffer_size;
   
   if (_slice_points_count) { /* pre-sliced */
     auto last_point_idx = _slice_points_count - 1;

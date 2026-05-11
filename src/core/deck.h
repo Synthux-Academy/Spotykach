@@ -72,15 +72,17 @@ public:
 
     float norm_start() const;
     void set_start(const float);
-    void start_mod_in(const float);
+    void set_start_mod(const float);
     void set_start_mod_on(const bool);
 
-    float norm_size(const bool incl_mod) const;
+    float norm_size() const;
     void set_size(const float);
-    void size_mod_in(const float);
-    void set_size_mod_on(const bool on);
+    void set_size_mod(const float);
+    void set_size_mod_on(const bool);
 
-    void apply_start_size();
+    void set_grid();
+
+    void prepare_processing();
 
     float norm_playhead_at(const uint8_t idx) const;
     float envelope_at(const uint8_t idx) const { return _generator.envelope_at(idx); };
@@ -116,9 +118,6 @@ private:
     void _stop_recording();
     void _clock_recording();
     void _set_buf_armed(const bool val);
-    void _set_grid(const bool round = false);
-    void _set_size();
-    void _set_start();
 
     void _resolve_in_out_mix();
 
@@ -147,11 +146,7 @@ private:
     float _tempo;
     float _record_tempo;
     
-    float _norm_start;
     float _start_step_kof;
-
-    float _norm_size;
-    float _norm_size_mod;
     float _size_mod_on;
 
     float _in_out_mix;
