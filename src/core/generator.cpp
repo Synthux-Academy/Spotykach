@@ -47,88 +47,71 @@ void Generator::set_mode(const Vox::Mode value)
 
 void Generator::set_start(float norm) 
 {
-  _norm_start = std::clamp(norm, 0.f, 1.f);
-  _apply_start();
+  _norm_start = norm;
 };
 void Generator::set_start_offset(const float value)
 {
   _norm_start_offset = value;
-  if (_cont_start_mod) _apply_start();
 };
-size_t Generator::_get_abs_start() 
-{
-  auto start = _norm_start + _norm_start_offset;
-  while (start > 1.f) start -= 1.f;
-  while (start < 0.f) start += 1.f;
-  auto buffer_size = _buffer->rec_size();
-  auto abs_start = 0;
-  if (_snap_to_slice || _slice_points_count > 0) {
-    abs_start = _snap(start);
-    _input_start = buffer_size > 0 ? static_cast<float>(abs_start) / buffer_size : 0;  
-    if (_slice_points_count > 0) {
-      _apply_size();
-    }
-  }
-  else {
-    abs_start = start * buffer_size;
-    _input_start = start;
-  }
-  return abs_start;
-}
-void Generator::_apply_start()
-{
-  auto abs_start = _get_abs_start();
-  for (auto& v: _voxs) v.set_start(abs_start);
-}
 
 void Generator::set_size(float norm) 
 {
-  if (!_snap_to_slice && _slice_points_count == 0) norm *= norm;
-  _norm_size = std::clamp(norm, 0.f, 1.f);
-
-  auto abs_size = _get_abs_size();
-  auto full_size = _buffer->rec_size();
-  for (auto& v: _voxs) {
-    v.set_size(abs_size);
-    v.set_full_size(full_size);
-  }
-  _input_size = std::max(abs_size, kSliceMinSize);
+  if (!_is_auto_slice && !_slice_points_count) norm *= norm;
+  _norm_size = norm;
 }
 void Generator::set_size_offset(const float offset) 
 {
   _norm_size_offset = offset;
-  switch (_vox_mode) {
-    case Vox::Mode::Spread: _apply_spread(); break;
-    case Vox::Mode::Linear: _apply_size(); break;
-  }
 }
-size_t Generator::_get_abs_size()
-{
-  volatile auto size = static_cast<int32_t>(_buffer->rec_size());
-  volatile auto min_size = static_cast<int32_t>(kSliceMinSize);
-  auto norm_size = std::clamp((_norm_size + _norm_size_offset) * 1.05f, 0.f, 1.f);
 
-  if (_slice_points_count > 0) {
-    auto base = _slice_points_count - 1;
-    volatile auto start_idx = static_cast<size_t>(_input_start * base);
-    volatile auto end_idx = static_cast<size_t>(std::round((norm_size + _input_start) * base));
-    if (end_idx == start_idx) end_idx += 1;
-    if (end_idx >= _slice_points_count) end_idx -= _slice_points_count;
-    volatile auto start = _slice_points[start_idx];
-    volatile auto end = _slice_points[end_idx];
-    if (end < start) end += size;
-    size = end - start;
-  }
-  else {
-    size = static_cast<int32_t>(norm_size * size);
-  }
-  return std::max(size, min_size);
-}
-void Generator::_apply_size()
+void Generator::apply_dimensions(const bool size_to_slice)
 {
-  _input_size = _get_abs_size();
-  for (auto& v: _voxs) v.set_size(_input_size);
+  auto norm_start = _norm_start + _norm_start_offset;
+  while (norm_start > 1.f) norm_start -= 1.f;
+  while (norm_start < 0.f) norm_start += 1.f;
+  norm_start = std::clamp(norm_start, 0.f, 1.f);
+  auto norm_size = std::clamp((_norm_size + _norm_size_offset) * 1.05f, 0.f, 1.f);
+  auto buffer_size = _buffer->rec_size();
+ 
+  float abs_start = 0; 
+  float abs_size = norm_size * buffer_size;
+  
+  if (_slice_points_count) { /* pre-sliced */
+    auto last_point_idx = _slice_points_count - 1;
+    auto start_idx = static_cast<size_t>(std::round(norm_start * last_point_idx));
+    abs_start = _slice_points[start_idx];
+
+    if (size_to_slice) {
+      auto end_idx = static_cast<size_t>(std::round((norm_start + norm_size) * last_point_idx));
+      if (end_idx == start_idx) end_idx += 1;
+      if (end_idx >= _slice_points_count) end_idx -= _slice_points_count;
+      auto abs_end = _slice_points[end_idx];
+      if (abs_end < abs_start) abs_end += buffer_size;
+      abs_size = abs_end - _abs_start;
+    }
+  }
+  else if (_is_auto_slice) { /* slice mode */
+    abs_start = _slice_size * std::round(norm_size * _auto_slice_max_idx);
+  }
+  else { /* reel & drift */
+    abs_start = norm_start * buffer_size; 
+  }
+
+  _abs_start = abs_start;
+  _abs_size = std::max((size_t)abs_size, kSliceMinSize);
+
+  for (auto& v: _voxs) {
+    if (_cont_start_mod) v.set_start(abs_start);
+    v.set_size(abs_size);
+    v.set_full_size(buffer_size);
+  }
+
+  // switch (_vox_mode) {
+  //   case Vox::Mode::Spread: _apply_spread(); break;
+  //   case Vox::Mode::Linear: _apply_size(); break;
+  // }
 }
+
 
 void Generator::slice() 
 {
@@ -149,17 +132,6 @@ void Generator::clear_slices()
 {
   std::memset(_slice_points, 0, sizeof(size_t) * kMaxSlicePointCount);
   _is_auto_slice = true;
-}
-size_t Generator::_snap(const float norm_value) 
-{
-  if (_slice_points_count > 0) {
-    auto idx = static_cast<size_t>(std::round(norm_value * (_slice_points_count - 1)));
-    return _slice_points[idx];
-  }
-  else {
-    auto idx = static_cast<size_t>(std::round(_auto_slice_max_idx * norm_value));
-    return _slice_size * idx;
-  }
 }
 
 void Generator::set_speed_mode(const SpeedMode mode) 
@@ -259,14 +231,7 @@ void Generator::trigger(const uint8_t vox_idx, const Event* event)
 {
   auto& v = _voxs[vox_idx];
 
-  // TODO: define override order, something like knob-over-cv-over-MIDI-over-event.
-  if (event->p1_on) { _norm_start = event->p1; }
-  if (!_cont_start_mod) v.set_start(_get_abs_start());
-
-  if (event->p2_on) { 
-    _norm_size = event->p2;
-    v.set_size(_get_abs_size());
-  }
+  if (!_cont_start_mod) v.set_start(_abs_start);
 
   /* gate in / midi / track */ 
   if (event->p3_on && (event->discont || !_cont_speed_mod)) {

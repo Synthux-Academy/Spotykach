@@ -74,14 +74,16 @@ public:
 protected:
   void set_mode(const Vox::Mode);
 
-  float start() const { return _input_start; }
+  float start() const { return _abs_start; }
   void set_start(float);
   void set_start_offset(const float);
   void set_cont_start_mod(const bool val) { _cont_start_mod = val; }; // If set to false (default), start is applied once at the beginning of the slice
 
-  float size() const { return _input_size; }
+  float size() const { return _abs_size; }
   void set_size(float);
   void set_size_offset(const float);
+
+  void apply_dimensions(const bool size_to_slice);
 
   bool is_reverse() const { return _reverse; }
   void set_reverse(const bool);
@@ -100,13 +102,10 @@ protected:
 
 private:
   NOCOPY(Generator)
-
-  size_t _get_abs_start();
-  size_t _get_abs_size();
+  
   size_t _abs_spread();
   size_t _snap(const float norm_value);
 
-  void _apply_start();
   void _apply_size();
   void _apply_spread();
 
@@ -115,12 +114,12 @@ private:
 
   std::function<void(const uint8_t)> _on_vox_stop;
 
-  float _input_start;
+  float _abs_start;
   bool _cont_start_mod;
   float _norm_start;
   float _norm_start_offset;
 
-  float _input_size;
+  float _abs_size;
   float _norm_size;
   float _norm_size_offset;
   float _norm_spread;
