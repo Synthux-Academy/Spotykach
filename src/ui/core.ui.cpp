@@ -158,7 +158,7 @@ void CoreUI::process()
     if (_apply.test(Hardware::CTRL_SIZE_A)) {
         if (is_drift_a) {
             deck_a.voxs().set_win_size(_win[Deck::A].value());
-            deck_a.voxs().set_win_spread(_size[Deck::A].value());
+            deck_a.set_size(_size[Deck::A].value(), _touched.test(Alt));
         }
         else if (deck_a.mode() == Mode::Slice && _touched.test(Alt)) {
             deck_a.set_force_mono((1.f - _poly_slice[Deck::A].value()) > .5f);
@@ -170,7 +170,7 @@ void CoreUI::process()
     if (_apply.test(Hardware::CTRL_SIZE_B)) {
         if (is_drift_b) {
             deck_b.voxs().set_win_size(_win[Deck::B].value());
-            deck_b.voxs().set_win_spread(_size[Deck::B].value());
+            deck_b.set_size(_size[Deck::B].value(), _touched.test(Alt));
         }
         else if (deck_b.mode() == Mode::Slice && _touched.test(Alt)) {
             deck_b.set_force_mono((1.f - _poly_slice[Deck::B].value()) > .5f);

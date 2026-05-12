@@ -73,14 +73,14 @@ void Generator::apply_dimensions(const bool size_to_slice)
   
   auto norm_size = std::clamp((_norm_size + _norm_size_offset) * 1.05f, 0.f, 1.f);
   auto buffer_size = _buffer->rec_size();
-  auto abs_size = norm_size * buffer_size;
+  auto abs_size = static_cast<size_t>(norm_size * buffer_size);
   
   if (_slice_points_count > 0) { /* pre-sliced */
     auto last_point_idx = _slice_points_count - 1;
     auto start_idx = static_cast<size_t>(std::round(norm_start * last_point_idx));
     abs_start = _slice_points[start_idx];
 
-    if (size_to_slice) {
+    if (size_to_slice && _vox_mode == Vox::Mode::Linear) {
       auto end_idx = static_cast<size_t>(std::round((norm_start + norm_size) * last_point_idx));
       if (end_idx == start_idx) end_idx += 1;
       if (end_idx >= _slice_points_count) end_idx -= _slice_points_count;
@@ -97,18 +97,29 @@ void Generator::apply_dimensions(const bool size_to_slice)
   }
 
   _abs_start = abs_start;
-  _abs_size = std::max((size_t)abs_size, kSliceMinSize);
+  switch (_vox_mode) {
+    case Vox::Mode::Linear:
+      _abs_size = std::max((size_t)abs_size, kSliceMinSize);
+      break;
+
+    case Vox::Mode::Spread:
+      _abs_spread = std::min(abs_size, kMaxSpread);
+      break;
+  }
 
   for (auto& v: _voxs) {
     if (_cont_start_mod) v.set_start(abs_start);
-    v.set_size(abs_size);
-    v.set_full_size(buffer_size);
-  }
+    switch (_vox_mode) {
+      case Vox::Mode::Linear: 
+        v.set_size(_abs_size); 
+        break;
 
-  // switch (_vox_mode) {
-  //   case Vox::Mode::Spread: _apply_spread(); break;
-  //   case Vox::Mode::Linear: _apply_size(); break;
-  // }
+      case Vox::Mode::Spread: 
+        v.set_spread(_abs_spread); 
+        v.set_full_size(buffer_size);
+        break;
+    }    
+  }
 }
 
 
@@ -197,19 +208,9 @@ void Generator::set_win_size(const float norm)
 {
   for (auto& v: _voxs) v.set_win_size(norm);
 }
-void Generator::set_win_spread(const float norm)
-{
-  _norm_spread = norm;
-}
-size_t Generator::_abs_spread() 
-{
-  _input_spread = std::clamp(_norm_spread + _norm_size_offset, 0.f, 1.f);
-  return static_cast<int32_t>(_input_spread * std::min(_buffer->rec_size(), (size_t)144000)); //3 seconds max
-}
-void Generator::_apply_spread()
-{
-  auto abs_spread = _abs_spread();
-  for (auto& v: _voxs) v.set_spread(abs_spread);
+float Generator::norm_spread() const { 
+  if (_buffer->is_empty()) return 0.f;
+  return _abs_spread / std::min(_buffer->rec_size(), kMaxSpread); 
 }
 
 void Generator::set_is_wide(const bool val)

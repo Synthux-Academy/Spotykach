@@ -23,6 +23,7 @@ public:
   };
 
   static constexpr uint8_t kVoxCount = 3;
+  static constexpr size_t kMaxSpread = 144000; // 3sec @48K
 
   Generator();
   ~Generator() = default;
@@ -33,13 +34,13 @@ public:
 
   void init(Buffer*, size_t* slice_points);
 
+  float norm_spread() const;
+
   // float start() { return static_cast<float>(_start); }
   void pitch_speed_mod_in(const float value);
   
   void set_shape(const float);
   void set_win_size(const float);
-  void set_win_spread(const float);
-  float win_spread() const { return _input_spread; }
 
   void set_pitch(const float);
 
@@ -102,12 +103,6 @@ protected:
 
 private:
   NOCOPY(Generator)
-  
-  size_t _abs_spread();
-  size_t _snap(const float norm_value);
-
-  void _apply_size();
-  void _apply_spread();
 
   Buffer* _buffer;
   std::array<Vox, kVoxCount> _voxs;
@@ -122,8 +117,7 @@ private:
   float _abs_size;
   float _norm_size;
   float _norm_size_offset;
-  float _norm_spread;
-  float _input_spread;
+  int32_t _abs_spread;
 
   size_t* _slice_points;
   size_t  _slice_size;
