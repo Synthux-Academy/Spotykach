@@ -3,27 +3,32 @@
 #include <string.h>
 #include <stdint.h>
 #include <bitset>
+#include <array>
 
 namespace spotykach {
 
 class Config
 {
 public:
-    struct Values {
-        uint8_t midi_channel_a = 0; // Actual 1
-        uint8_t midi_channel_b = 1; // Actual 2
-        uint8_t midi_play_stop_a = 0;
-        uint8_t midi_play_stop_b = 0;
-        bool is_preload_on = true;
-        std::bitset<2> is_slice_mono = { 0 };
+    enum CueSizeMode: uint8_t {
+        ignore  = 0,
+        snap    = 1,
+        free    = 2
     };
 
-    uint8_t midi_channel_a() const { return _vals.midi_channel_a; }
-    uint8_t midi_channel_b() const { return _vals.midi_channel_b; }
-    uint8_t midi_play_stop_a() const { return _vals.midi_play_stop_a; }
-    uint8_t midi_play_stop_b() const { return _vals.midi_play_stop_b; }
+    struct Values {
+        std::array<uint8_t, 2> midi_channel = { 0, 1 }; // Actual 1 , 2
+        std::bitset<2> midi_play_stop = 0;
+        std::bitset<2> is_slice_mono = { 0 };
+        std::array<uint8_t, 2> cue_size_mode = { snap, snap };
+        bool is_preload_on = true;
+    };
+
+    uint8_t midi_channel(const uint8_t idx) const { return _vals.midi_channel[idx]; }
+    uint8_t midi_play_stop(const uint8_t idx) const { return _vals.midi_play_stop[idx]; }
     bool is_preload_on() const { return _vals.is_preload_on; }
     bool is_slice_mono(const int idx) const { return _vals.is_slice_mono.test(idx); }
+    CueSizeMode cue_size_mode(const int idx) const { return static_cast<CueSizeMode>(_vals.cue_size_mode[idx]); }
 
     bool is_loaded() const { return _is_loaded; }
 

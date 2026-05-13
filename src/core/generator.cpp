@@ -111,7 +111,9 @@ void Generator::apply_dimensions()
     auto start_idx = static_cast<size_t>(std::round(norm_start * last_point_idx));
     abs_start = _slice_points[start_idx];
 
-    if (_alt_size) {
+    auto mode = Config::dynamic().cue_size_mode(ref);
+    using CSM = Config::CueSizeMode;
+    if ((_alt_size && mode == CSM::free) || (!_alt_size && mode == CSM::snap)) {
       auto end_idx = static_cast<size_t>(std::round((norm_start + norm_size) * last_point_idx));
       if (end_idx == start_idx) end_idx += 1;
       if (end_idx >= _slice_points_count) end_idx -= _slice_points_count;

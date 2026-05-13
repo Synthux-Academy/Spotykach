@@ -54,8 +54,8 @@ void CoreUI::_process_note_on(daisy::NoteOnEvent& note_on)
 {
     auto ref = Deck::Count;
     auto& c = Config::dynamic();
-    if (note_on.channel == c.midi_channel_a()) ref = Deck::A;
-    else if (note_on.channel == c.midi_channel_b()) ref = Deck::B;
+    if (note_on.channel == c.midi_channel(Deck::A)) ref = Deck::A;
+    else if (note_on.channel == c.midi_channel(Deck::B)) ref = Deck::B;
     if (ref != Deck::Count) {
         _trigger(ref, _speed_map.bipolar_pitch2speed(note_on.note - 60), true);
     }
@@ -78,14 +78,14 @@ bool CoreUI::_process_realtime(daisy::MidiEvent& event)
         case SystemRealTimeType::Start:
         case SystemRealTimeType::Continue: {
             _core.driver().reset();
-            if (c.midi_play_stop_a() && !_core.deck(Deck::A).is_empty()) _core.deck(Deck::A).play();
-            if (c.midi_play_stop_b() && !_core.deck(Deck::B).is_empty()) _core.deck(Deck::B).play();    
+            if (c.midi_play_stop(Deck::A) && !_core.deck(Deck::A).is_empty()) _core.deck(Deck::A).play();
+            if (c.midi_play_stop(Deck::B) && !_core.deck(Deck::B).is_empty()) _core.deck(Deck::B).play();    
             break;
         }
 
         case SystemRealTimeType::Stop: {
-            if (c.midi_play_stop_a()) _core.deck(Deck::A).stop();
-            if (c.midi_play_stop_b()) _core.deck(Deck::B).stop();
+            if (c.midi_play_stop(Deck::A)) _core.deck(Deck::A).stop();
+            if (c.midi_play_stop(Deck::B)) _core.deck(Deck::B).stop();
             break;
         }
 

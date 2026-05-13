@@ -58,12 +58,14 @@ void Config::fill(const uint8_t* data, const size_t size)
         }
         val *= sign;
 
-             if (memcmp(prop, "mid_ch_a", line_size) == 0) { _vals.midi_channel_a = val - 1;  _is_loaded = true; }
-        else if (memcmp(prop, "mid_ch_b", line_size) == 0) { _vals.midi_channel_b = val - 1;  _is_loaded = true; }
-        else if (memcmp(prop, "mid_ps_a", line_size) == 0) { _vals.midi_play_stop_a = val;    _is_loaded = true; }
-        else if (memcmp(prop, "mid_ps_b", line_size) == 0) { _vals.midi_play_stop_b = val;    _is_loaded = true; }
+             if (memcmp(prop, "mid_ch_a", line_size) == 0) { _vals.midi_channel[0] = val - 1;  _is_loaded = true; }
+        else if (memcmp(prop, "mid_ch_b", line_size) == 0) { _vals.midi_channel[1] = val - 1;  _is_loaded = true; }
+        else if (memcmp(prop, "mid_ps_a", line_size) == 0) { _vals.midi_play_stop[0] = val;    _is_loaded = true; }
+        else if (memcmp(prop, "mid_ps_b", line_size) == 0) { _vals.midi_play_stop[1] = val;    _is_loaded = true; }
         else if (memcmp(prop, "pre_load", line_size) == 0) { _vals.is_preload_on = val;       _is_loaded = true; }
-        else if (memcmp(prop, "s_mono_a", line_size) == 0) { _vals.is_slice_mono.set(0, val); _is_loaded = true; }
-        else if (memcmp(prop, "s_mono_b", line_size) == 0) { _vals.is_slice_mono.set(1, val); _is_loaded = true; }
+        else if (memcmp(prop, "slc_mn_a", line_size) == 0) { _vals.is_slice_mono.set(0, val); _is_loaded = true; }
+        else if (memcmp(prop, "slc_mn_b", line_size) == 0) { _vals.is_slice_mono.set(1, val); _is_loaded = true; }
+        else if (memcmp(prop, "cue_sm_a", line_size) == 0) { _vals.cue_size_mode[0] = val;    _is_loaded = true; }
+        else if (memcmp(prop, "cue_sm_b", line_size) == 0) { _vals.cue_size_mode[1] = val;    _is_loaded = true; }
     }
 }
