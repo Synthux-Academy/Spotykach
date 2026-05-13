@@ -66,7 +66,6 @@ void CoreUI::_init_values()
         _env[ref].set(0.f);
         _env_size[ref].set(1.f);
         _win[ref].set(.2f);
-        _poly_slice[ref].set(.51f);
 
         _mod_speed[ref].set(.3f);
         _mod_amp[ref].set(0.f);
@@ -388,7 +387,6 @@ void CoreUI::_process_ui_queue()
                             }
                             else {
                                 _size[Deck::A].process(val, !is_alt_touched, changing_id_a);
-                                _poly_slice[Deck::A].process(val, is_alt_touched, changing_id_a);    
                                 _size_quarters[Deck::A].set(val);
                             }
                         }
@@ -465,7 +463,6 @@ void CoreUI::_process_ui_queue()
                             }
                             else {
                                 _size[Deck::B].process(val, !is_alt_touched, changing_id_b);
-                                _poly_slice[Deck::B].process(val, is_alt_touched, changing_id_b);
                                 _size_quarters[Deck::B].set(val);
                             }
                         }

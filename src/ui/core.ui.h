@@ -177,7 +177,6 @@ private:
     std::array<MValue, Deck::Count> _env;
     std::array<MValue, Deck::Count> _env_size;
     std::array<MValue, Deck::Count> _win;
-    std::array<MValue, Deck::Count> _poly_slice;
     std::array<MValue, Deck::Count> _size_quarters;
     std::array<MValue, Deck::Count> _mod_speed;
     std::array<MValue, Deck::Count> _mod_amp;

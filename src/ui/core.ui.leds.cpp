@@ -449,29 +449,6 @@ void CoreUI::_draw_ring(const Deck::Ref ref)
     _show_value(_env[ref], ring);
     _show_value(_env_size[ref], ring);
     _show_pitch(ref);
-
-    if (_is_changing(_poly_slice[ref])) 
-    {
-        ring.clear();
-        auto start = 0.f;
-        if (!_poly_slice[ref].is_tracking()) {
-            start = _poly_slice[ref].in_value() < .5f ? 0.f : .5f;    
-            ring.set_brightness(.6f);
-            ring.set_hex_color(kRed);
-            ring.set_segment(start, start + .495f);
-        }
-        ring.set_brightness(.6f);
-        ring.set_hex_color(kWhite);
-        if (_poly_slice[ref].value() < .5f) {
-            ring.set_segment(.2f, .3f, true);
-        }
-        else {
-            ring.set_segment(.5f, .535f, true);
-            ring.set_segment(.65f, .7f, true);
-            ring.set_segment(.825f, .855f, true);
-            ring.set_segment(.97f, 1.f, true);
-        }
-    }
     
     ring.set_updated();
 }
