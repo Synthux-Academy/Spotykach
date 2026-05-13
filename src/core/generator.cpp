@@ -106,13 +106,14 @@ void Generator::apply_dimensions()
   auto mode = Config::dynamic().cue_size_mode(ref);
   using CSM = Config::CueSizeMode;
   if (mode != CSM::ignore && _slice_points_count > 1) { /* pre-sliced */
-    auto start_idx = static_cast<size_t>(std::round(norm_start * (_slice_points_count - 2)));
+    auto last_idx = _slice_points_count - 1;
+    auto start_idx = static_cast<size_t>(std::round(norm_start * (last_idx - 1)));
     abs_start = _slice_points[start_idx];
 
     if (_vox_mode != VM::Spread && ((_alt_size && mode == CSM::free) || (!_alt_size && mode == CSM::snap))) {
-      auto delta_idx = static_cast<size_t>(std::round(norm_size * (_slice_points_count - 2))) + 1;
+      auto delta_idx = static_cast<size_t>(std::round(norm_size * (last_idx - 1))) + 1;
       auto end_idx = start_idx + delta_idx;
-      if (end_idx >= _slice_points_count) end_idx -= _slice_points_count - 1;
+      if (end_idx > last_idx) end_idx -= last_idx;
       auto abs_end = _slice_points[end_idx];
       if (abs_end < abs_start) abs_end += buffer_size;
       if (end_idx != start_idx) abs_size = abs_end - abs_start;
