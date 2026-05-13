@@ -101,7 +101,7 @@ void Deck::_set_mode(const Mode new_mode)
             g.set_snap_to_slice(true);
             g.set_start_mod_cont(false);
             g.set_pitch_mod_cont(false);
-            set_grid();
+            _make_grid();
             _resolve_playhead();
             break;
         
@@ -173,7 +173,7 @@ void Deck::_clock_recording()
         else if (_is_record_queued) {
             _is_record_queued = false;
             _is_cut_queued = true;
-            set_grid();
+            _make_grid();
         }    
     }
     else if (_is_record_queued) {
@@ -187,7 +187,7 @@ void Deck::_start_recording()
 }
 void Deck::_stop_recording() 
 {
-    set_grid();
+    if (_mode == Mode::Slice) _make_grid();
     _detector.set_armed(false);
     _buffer.set_recording(false);
 };
@@ -206,7 +206,7 @@ float Deck::tempo_to_fit(const float frac)
     auto bpm = 2880000 * (1 + round(frac * 15)) / _buffer.rec_size();
     _tempo = bpm;
     _record_tempo = bpm;
-    set_grid();
+    _make_grid();
     return bpm;
 }
 void Deck::tick(const bool common_tick, const bool is_key) 
@@ -243,7 +243,7 @@ void Deck::tick(const bool common_tick, const bool is_key)
 }
 
 // Size /////////////////////////////////////////
-void Deck::set_grid()
+void Deck::_make_grid()
 {   
     _record_tempo = _tempo;
     if (is_overdubbing()) return;
@@ -369,9 +369,8 @@ void Deck::process_in(const float in0, const float in1)
 
     if (_buffer.read_reset_did_cut() && _buffer.is_recording()) {
         _is_cut_queued = false;
-        set_grid();
         switch (_mode) {
-            case Mode::Slice: _is_play_queued = true; break;
+            case Mode::Slice: _make_grid(); _is_play_queued = true; break;
             default: play(); break;
         }
     }

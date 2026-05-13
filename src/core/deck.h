@@ -72,8 +72,6 @@ public:
     void trigger(Event *);
     void reset_track_divider() { _pattern_divider.reset(); }
 
-    void set_grid();
-
     float norm_playhead_at(const uint8_t idx) const;
     float envelope_at(const uint8_t idx) const { return _generator.envelope_at(idx); };
 
@@ -109,6 +107,7 @@ private:
 
     void _resolve_in_out_mix();
 
+    void _make_grid();
     void _quantize_loop(const float);
     
     void _resolve_playhead();

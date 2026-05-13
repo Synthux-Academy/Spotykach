@@ -386,7 +386,7 @@ void CoreUI::_process_ui_queue()
                                 _set_tempo_by_size(Deck::A, val);
                             }
                             else {
-                                _size[Deck::A].process(val, !is_alt_touched, changing_id_a);
+                                _size[Deck::A].process(val, true, changing_id_a);
                                 _size_quarters[Deck::A].set(val);
                             }
                         }
@@ -462,7 +462,7 @@ void CoreUI::_process_ui_queue()
                                 _set_tempo_by_size(Deck::B, val);
                             }
                             else {
-                                _size[Deck::B].process(val, !is_alt_touched, changing_id_b);
+                                _size[Deck::B].process(val, true, changing_id_b);
                                 _size_quarters[Deck::B].set(val);
                             }
                         }
