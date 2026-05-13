@@ -236,7 +236,7 @@ void Deck::tick(const bool common_tick, const bool is_key)
     if (e != nullptr && e->on && (!_generator.is_suspended() || !_generator.is_generating())) {
         auto hold = true;
         if (_mode == Mode::Slice) {
-            hold = _force_mono || (_track.is_empty() && common_tick);
+            hold = Config::dynamic().is_slice_mono(ref) || (_track.is_empty() && common_tick);
         }
         _dispatcher.event_on(e, hold);
     }
@@ -403,10 +403,11 @@ void Deck::trigger(Event* event)
         }
         _track.add_event(event);
     }
-    if (_mode == Mode::Slice && _force_mono) {
+    auto is_mono = Config::dynamic().is_slice_mono(ref);
+    if (_mode == Mode::Slice && is_mono) {
         _loop_tick_count = 0;
     }   
-    _dispatcher.event_on(event, _mode != Mode::Slice || _force_mono);
+    _dispatcher.event_on(event, _mode != Mode::Slice || is_mono);
 };
 void Deck::clear_sequence() {
     _track.disarm(true);

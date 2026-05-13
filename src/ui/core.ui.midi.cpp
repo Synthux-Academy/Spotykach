@@ -1,5 +1,4 @@
 #include "core.ui.h"
-#include "config.h"
 #include "daisy.h"
 
 using namespace spotykach;

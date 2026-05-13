@@ -1,6 +1,5 @@
 #include "core.ui.h"
 #include "Utility/dsp.h"
-#include "config.h"
 
 using namespace spotykach;
 using namespace infrasonic;

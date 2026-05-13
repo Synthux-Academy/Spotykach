@@ -4,7 +4,6 @@
 #include "dev/sdram.h"
 #include "daisy_seed.h"
 #include "nocopy.h"
-#include "config.h"
 #include "../core/track.h"
 #include "../core/detector.h"
 #include "../core/fx.h"

@@ -86,8 +86,6 @@ public:
 
     Mode mode() const { return _mode; }
     void set_mode(const Mode val);
-    void set_force_mono(const bool value)  { _force_mono = value; }
-    bool force_mono() const { return _force_mono; }
 
     void set_inout_mix(const float val);
     void inout_mix_mod_in(const float val);
@@ -158,6 +156,5 @@ private:
     bool _is_playing;
     bool _adjust_count;
     bool _is_cut_queued;
-    bool _force_mono;
 };
 };

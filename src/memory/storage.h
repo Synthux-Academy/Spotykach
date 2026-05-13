@@ -5,7 +5,7 @@
 #include "hw/card.h"
 #include "hw/buffer.sdram.h"
 #include "core/deck.h"
-#include "config.h"
+#include "core/config.h"
 #include "nocopy.h"
 
 namespace spotykach {
