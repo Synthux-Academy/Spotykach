@@ -117,7 +117,7 @@ private:
   float _abs_size;
   float _norm_size;
   float _norm_size_offset;
-  int32_t _abs_spread;
+  float _abs_spread;
 
   size_t* _slice_points;
   size_t  _slice_size;

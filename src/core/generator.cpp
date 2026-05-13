@@ -73,14 +73,23 @@ void Generator::apply_dimensions(const bool size_to_slice)
   
   auto norm_size = std::clamp((_norm_size + _norm_size_offset) * 1.05f, 0.f, 1.f);
   auto buffer_size = _buffer->rec_size();
-  auto abs_size = static_cast<size_t>(norm_size * buffer_size);
+  auto abs_size = 0.f;
+  switch (_vox_mode) {
+    case Vox::Mode::Linear:
+      abs_size = norm_size * buffer_size;
+      break;
+
+    case Vox::Mode::Spread:
+      abs_size = norm_size * std::min(buffer_size, kMaxSpread);
+      break;
+  }
   
   if (_slice_points_count > 0) { /* pre-sliced */
     auto last_point_idx = _slice_points_count - 1;
     auto start_idx = static_cast<size_t>(std::round(norm_start * last_point_idx));
     abs_start = _slice_points[start_idx];
 
-    if (size_to_slice && _vox_mode == Vox::Mode::Linear) {
+    if (size_to_slice) {
       auto end_idx = static_cast<size_t>(std::round((norm_start + norm_size) * last_point_idx));
       if (end_idx == start_idx) end_idx += 1;
       if (end_idx >= _slice_points_count) end_idx -= _slice_points_count;
@@ -93,7 +102,7 @@ void Generator::apply_dimensions(const bool size_to_slice)
     abs_start = _slice_size * std::round(norm_start * _auto_slice_max_idx);
   }
   else { /* reel & drift */
-    abs_start = norm_start * buffer_size; 
+    abs_start = norm_start * buffer_size;
   }
 
   _abs_start = abs_start;
@@ -103,7 +112,7 @@ void Generator::apply_dimensions(const bool size_to_slice)
       break;
 
     case Vox::Mode::Spread:
-      _abs_spread = std::min(abs_size, kMaxSpread);
+      _abs_spread = std::min((size_t)abs_size, kMaxSpread);
       break;
   }
 
@@ -111,7 +120,7 @@ void Generator::apply_dimensions(const bool size_to_slice)
     if (_cont_start_mod) v.set_start(abs_start);
     switch (_vox_mode) {
       case Vox::Mode::Linear: 
-        v.set_size(_abs_size); 
+        v.set_size(_abs_size);
         break;
 
       case Vox::Mode::Spread: 
@@ -121,7 +130,6 @@ void Generator::apply_dimensions(const bool size_to_slice)
     }    
   }
 }
-
 
 void Generator::slice() 
 {
