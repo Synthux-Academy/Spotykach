@@ -45,26 +45,48 @@ void Generator::set_mode(const Vox::Mode value)
   for (auto& v: _voxs) v.set_mode(value);
 }
 
+float Generator::norm_start() const 
+{ 
+    if (_buffer->is_empty()) return 0.f;
+    return _abs_start / _buffer->rec_size();
+};
 void Generator::set_start(float norm) 
 {
   _norm_start = norm;
 };
-void Generator::set_start_offset(const float value)
+void Generator::set_start_mod_on(const bool on)
 {
-  _norm_start_offset = value;
+    _is_start_mod_on = on;
 };
+void Generator::set_start_mod(const float val)
+{
+    auto norm_start_offset = 0.f;
+    if (_is_start_mod_on) norm_start_offset = std::abs(val) < 0.01 ? 0 : val;
+    _norm_start_offset = norm_start_offset;
+}
 
-void Generator::set_size(float norm) 
+float Generator::norm_size() const {
+    if (_buffer->is_empty()) return 0.f;
+    return _abs_size / _buffer->rec_size();
+}
+void Generator::set_size(float norm, const bool alt) 
 {
   if (!_is_auto_slice && !_slice_points_count) norm *= norm;
   _norm_size = norm;
+  _alt_size = alt;
 }
-void Generator::set_size_offset(const float offset) 
+void Generator::set_size_mod_on(const bool on) 
+{ 
+    _is_size_mod_on = on;
+};
+void Generator::set_size_mod(const float val) 
 {
-  _norm_size_offset = offset;
-}
+    auto norm_size_offset = 0.f;
+    if (_is_size_mod_on) norm_size_offset = std::abs(val) < 0.01 ? 0 : val;
+    _norm_size_offset = norm_size_offset;
+};
 
-void Generator::apply_dimensions(const bool size_to_slice)
+void Generator::apply_dimensions()
 {
   auto abs_start = 0.f; 
   auto norm_start = _norm_start + _norm_start_offset;
@@ -89,7 +111,7 @@ void Generator::apply_dimensions(const bool size_to_slice)
     auto start_idx = static_cast<size_t>(std::round(norm_start * last_point_idx));
     abs_start = _slice_points[start_idx];
 
-    if (size_to_slice) {
+    if (_alt_size) {
       auto end_idx = static_cast<size_t>(std::round((norm_start + norm_size) * last_point_idx));
       if (end_idx == start_idx) end_idx += 1;
       if (end_idx >= _slice_points_count) end_idx -= _slice_points_count;

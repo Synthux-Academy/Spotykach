@@ -12,7 +12,6 @@ _pattern_divider     { Divider(kPPQNIntern, Every::_32th) },
 _tempo               { 0.43f },
 _record_tempo        { 0.f },
 _start_step_kof      { 1.f },
-_size_mod_on         { false },
 _in_out_mix          { .5f },
 _in_out_mix_offset   { 0.f },
 _feedback            { kDefaultFeedback },
@@ -87,8 +86,8 @@ void Deck::_set_mode(const Mode new_mode)
             g.apply_speed();
             g.apply_shape();
             g.set_snap_to_slice(false);
-            g.set_cont_start_mod(true);
-            g.set_cont_pitch_mod(true);
+            g.set_start_mod_cont(true);
+            g.set_pitch_mod_cont(true);
             if (_needs_kickstart()) _dispatch();
             break;
 
@@ -100,8 +99,8 @@ void Deck::_set_mode(const Mode new_mode)
             g.apply_pitch();
             g.apply_shape();
             g.set_snap_to_slice(true);
-            g.set_cont_start_mod(false);
-            g.set_cont_pitch_mod(false);
+            g.set_start_mod_cont(false);
+            g.set_pitch_mod_cont(false);
             set_grid();
             _resolve_playhead();
             break;
@@ -113,8 +112,8 @@ void Deck::_set_mode(const Mode new_mode)
             g.apply_speed();
             g.apply_shape();
             g.set_snap_to_slice(false);
-            g.set_cont_start_mod(true);
-            g.set_cont_pitch_mod(true);
+            g.set_start_mod_cont(true);
+            g.set_pitch_mod_cont(true);
             break;
 
         case Mode::None: break;
@@ -243,47 +242,7 @@ void Deck::tick(const bool common_tick, const bool is_key)
     }
 }
 
-// Start //////////////////////////////////////////
-float Deck::norm_start() const 
-{ 
-    if (_buffer.is_empty()) return 0.f;
-    return _generator.start() / _buffer.rec_size();
-}
-void Deck::set_start(const float val)
-{
-    _generator.set_start(val);
-}
-void Deck::set_start_mod_on(const bool on)
-{
-    _start_mod_on = on;
-}
-void Deck::set_start_mod(const float val)
-{
-    auto norm_start_mod = 0.f;
-    if (_start_mod_on) norm_start_mod = std::abs(val) < 0.01 ? 0 : val;
-    _generator.set_start_offset(norm_start_mod);
-}
-
 // Size /////////////////////////////////////////
-float Deck::norm_size() const {
-    if (_buffer.is_empty()) return 0.f;
-    return _generator.size() / _buffer.rec_size();
-}
-void Deck::set_size(const float norm, const bool alt) 
-{
-    _alt_size = alt;
-    _generator.set_size(norm);
-};
-void Deck::set_size_mod_on(const bool on) 
-{ 
-    _size_mod_on = on;
-}
-void Deck::set_size_mod(const float val) 
-{
-    auto norm_size_mod = 0.f;
-    if (_size_mod_on) norm_size_mod = std::abs(val) < 0.01 ? 0 : val;
-    _generator.set_size_offset(norm_size_mod);
-}
 void Deck::set_grid()
 {   
     _record_tempo = _tempo;
@@ -305,7 +264,7 @@ void Deck::_quantize_loop(const float norm_size)
     _loop_ticks = loop_ticks;
 }
 
-// Play /..////////////////////////////////////////
+// Play /////////////////////////////////////////
 void Deck::toggle_play() 
 {   
     if (_is_playing) {
@@ -376,8 +335,8 @@ void Deck::_resolve_playhead()
 // Render ///////////////////////////////////////////
 void Deck::prepare()
 {
-    _generator.apply_dimensions(_alt_size);
-    if (_mode == Mode::Slice) _quantize_loop(norm_size());
+    _generator.apply_dimensions();
+    if (_mode == Mode::Slice) _quantize_loop(_generator.norm_size());
 }
 void Deck::process_out(const float in0, const float in1, float& out0, float& out1) 
 {

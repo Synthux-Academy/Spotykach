@@ -72,16 +72,6 @@ public:
     void trigger(Event *);
     void reset_track_divider() { _pattern_divider.reset(); }
 
-    float norm_start() const;
-    void set_start(const float);
-    void set_start_mod(const float);
-    void set_start_mod_on(const bool);
-
-    float norm_size() const;
-    void set_size(const float, const bool alt);
-    void set_size_mod(const float);
-    void set_size_mod_on(const bool);
-
     void set_grid();
 
     float norm_playhead_at(const uint8_t idx) const;
@@ -147,7 +137,6 @@ private:
     float _record_tempo;
     
     float _start_step_kof;
-    float _size_mod_on;
 
     float _in_out_mix;
     float _in_out_mix_offset;
@@ -168,10 +157,7 @@ private:
     bool _is_record_queued;
     bool _is_playing;
     bool _adjust_count;
-    bool _start_mod_on;
-    bool _length_mod_on;
     bool _is_cut_queued;
     bool _force_mono;
-    bool _alt_size;
 };
 };

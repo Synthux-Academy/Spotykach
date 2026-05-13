@@ -39,6 +39,17 @@ public:
   // float start() { return static_cast<float>(_start); }
   void pitch_speed_mod_in(const float value);
   
+  float norm_start() const;
+  void set_start(float);
+  void set_start_mod(const float);
+  void set_start_mod_on(const bool);
+  void set_start_mod_cont(const bool val) { _cont_start_mod = val; }; // If set to false (default), start is applied once at the beginning of the slice
+
+  float norm_size() const;
+  void set_size(const float, const bool alt);
+  void set_size_mod(const float);
+  void set_size_mod_on(const bool);
+
   void set_shape(const float);
   void set_win_size(const float);
 
@@ -75,22 +86,13 @@ public:
 protected:
   void set_mode(const Vox::Mode);
 
-  float start() const { return _abs_start; }
-  void set_start(float);
-  void set_start_offset(const float);
-  void set_cont_start_mod(const bool val) { _cont_start_mod = val; }; // If set to false (default), start is applied once at the beginning of the slice
-
-  float size() const { return _abs_size; }
-  void set_size(float);
-  void set_size_offset(const float);
-
-  void apply_dimensions(const bool size_to_slice);
+  void apply_dimensions();
 
   bool is_reverse() const { return _reverse; }
   void set_reverse(const bool);
 
   void apply_pitch() { set_pitch(_norm_pitch_speed); }
-  void set_cont_pitch_mod(const bool val) { _cont_speed_mod = val; }
+  void set_pitch_mod_cont(const bool val) { _cont_speed_mod = val; }
   
   void trigger(const uint8_t vox_idx, const Event* event);
 
@@ -145,5 +147,8 @@ private:
 
   bool _reverse;
   bool _is_triggered;
+  bool _is_start_mod_on;
+  bool _is_size_mod_on;
+  bool _alt_size;
 };
 };

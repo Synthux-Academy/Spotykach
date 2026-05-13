@@ -58,7 +58,7 @@ void CoreUI::_init_values()
     for (auto ref: { Deck::A, Deck::B }) {
         
         auto& deck = _core.deck(ref);
-        _pos[ref].set(deck.norm_start());
+        _pos[ref].set(0.f);
         _size[ref].set(1.f);
         _speed[ref].set(.5f);
         _mix[ref].set(.5f);
@@ -136,7 +136,7 @@ void CoreUI::process()
             deck_a.fx().set_flux_fb(_flux_fb[Deck::A].value());
         }
         else {
-            deck_a.set_start(_pos[Deck::A].value());
+            deck_a.voxs().set_start(_pos[Deck::A].value());
         }
     }
     if (_apply.test(Hardware::CTRL_POS_B)) {
@@ -144,39 +144,39 @@ void CoreUI::process()
             deck_b.fx().set_flux_fb(_flux_fb[Deck::B].value());
         }
         else {
-            deck_b.set_start(_pos[Deck::B].value());
+            deck_b.voxs().set_start(_pos[Deck::B].value());
         }
     }
     if (_apply.test(Hardware::CTRL_ENV_A)) {
-        if (is_drift_a) deck_a.set_size(_env_size[Deck::A].value(), false);
+        if (is_drift_a) deck_a.voxs().set_size(_env_size[Deck::A].value(), false);
         deck_a.voxs().set_shape(_env[Deck::A].value());
     }
     if (_apply.test(Hardware::CTRL_ENV_B)) {
-        if (is_drift_b) deck_b.set_size(_env_size[Deck::B].value(), false);
+        if (is_drift_b) deck_b.voxs().set_size(_env_size[Deck::B].value(), false);
         deck_b.voxs().set_shape(_env[Deck::B].value());
     }
     if (_apply.test(Hardware::CTRL_SIZE_A)) {
         if (is_drift_a) {
             deck_a.voxs().set_win_size(_win[Deck::A].value());
-            deck_a.set_size(_size[Deck::A].value(), _touched.test(Alt));
+            deck_a.voxs().set_size(_size[Deck::A].value(), _touched.test(Alt));
         }
         else if (deck_a.mode() == Mode::Slice && _touched.test(Alt)) {
             deck_a.set_force_mono((1.f - _poly_slice[Deck::A].value()) > .5f);
         }
         else {
-            deck_a.set_size(_size[Deck::A].value(), _touched.test(Alt));
+            deck_a.voxs().set_size(_size[Deck::A].value(), _touched.test(Alt));
         }
     }
     if (_apply.test(Hardware::CTRL_SIZE_B)) {
         if (is_drift_b) {
             deck_b.voxs().set_win_size(_win[Deck::B].value());
-            deck_b.set_size(_size[Deck::B].value(), _touched.test(Alt));
+            deck_b.voxs().set_size(_size[Deck::B].value(), _touched.test(Alt));
         }
         else if (deck_b.mode() == Mode::Slice && _touched.test(Alt)) {
             deck_b.set_force_mono((1.f - _poly_slice[Deck::B].value()) > .5f);
         }
         else {
-            deck_b.set_size(_size[Deck::B].value(), _touched.test(Alt));
+            deck_b.voxs().set_size(_size[Deck::B].value(), _touched.test(Alt));
         }
     }
     if (_apply.test(Hardware::CTRL_PITCH_A)) {
@@ -278,8 +278,8 @@ void CoreUI::read_cv() {
     auto cor_pos_size_mod_a = _calibrator.correct(Hardware::CV_SIZE_POS_A, pos_size_mod_a);
     cor_pos_size_mod_a = std::round(cor_pos_size_mod_a * 1000.f) / 1000.f;
 
-    deck_a.set_start_mod(cor_pos_size_mod_a);
-    deck_a.set_size_mod(cor_pos_size_mod_a);
+    deck_a.voxs().set_start_mod(cor_pos_size_mod_a);
+    deck_a.voxs().set_size_mod(cor_pos_size_mod_a);
     
 
     auto raw_cv_a = _hw.GetControlVoltageValue(Hardware::CV_V_OCT_A);
@@ -296,8 +296,8 @@ void CoreUI::read_cv() {
     auto pos_size_mod_b = _hw.GetControlVoltageValue(Hardware::CV_SIZE_POS_B);
     auto cor_pos_size_mod_b = _calibrator.correct(Hardware::CV_SIZE_POS_B, pos_size_mod_b);
     cor_pos_size_mod_b = std::round(cor_pos_size_mod_b * 1000.f) / 1000.f;
-    deck_b.set_start_mod(cor_pos_size_mod_b);
-    deck_b.set_size_mod(cor_pos_size_mod_b);
+    deck_b.voxs().set_start_mod(cor_pos_size_mod_b);
+    deck_b.voxs().set_size_mod(cor_pos_size_mod_b);
 
     auto raw_cv_b = _hw.GetControlVoltageValue(Hardware::CV_V_OCT_B);
     auto voct_b = _calibrator.correctVOctB(raw_cv_b);
@@ -577,8 +577,8 @@ void CoreUI::_process_switches()
     }
 
     // Size/Pos A switch
-    deck_a.set_start_mod_on(sr1.test(5) || !sr1.test(4));
-    deck_a.set_size_mod_on(sr1.test(4) || !sr1.test(5));
+    deck_a.voxs().set_start_mod_on(sr1.test(5) || !sr1.test(4));
+    deck_a.voxs().set_size_mod_on(sr1.test(4) || !sr1.test(5));
 
     // Mod B Type switch
     auto& mod_b = _core.mod(Deck::B);
@@ -604,8 +604,8 @@ void CoreUI::_process_switches()
     }
 
     // Size/Pos B switch
-    deck_b.set_start_mod_on(sr2.test(1) || !sr2.test(0));
-    deck_b.set_size_mod_on(sr2.test(0) || !sr2.test(1));
+    deck_b.voxs().set_start_mod_on(sr2.test(1) || !sr2.test(0));
+    deck_b.voxs().set_size_mod_on(sr2.test(0) || !sr2.test(1));
 
     // Manual tempo tap switch
     // Update no faster than 500Hz

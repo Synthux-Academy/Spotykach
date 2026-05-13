@@ -364,14 +364,14 @@ void CoreUI::_draw_ring(const Deck::Ref ref)
     }  
     else if (!deck.is_empty()) {
         // BUFFER SEGMENT ///////////////////////////////////////////
-        auto segment_start = deck.norm_start();
+        auto segment_start = deck.voxs().norm_start();
         auto segment_size = 0.f;
         if (deck.mode() == Mode::Drift) {
             segment_size = deck.voxs().norm_spread() * .95f;
             segment_start -= segment_size * .5f;
         }
         else {
-            segment_size = deck.norm_size();  
+            segment_size = deck.voxs().norm_size();  
         }
         ring.set_segment(segment_start, segment_start + segment_size);
         // PLAYHEADS /////////////////////////////////////////////////
@@ -393,7 +393,7 @@ void CoreUI::_draw_ring(const Deck::Ref ref)
                 // RED
                 ring.set_brightness(.6f);
                 ring.set_hex_color(kRed);
-                segment_start = deck.norm_start() - red_value * .5f;
+                segment_start = deck.voxs().norm_start() - red_value * .5f;
                 ring.set_segment(segment_start, segment_start + red_value, true);
                 if (_size[ref].in_value() > _size[ref].value()) {
                     ring.add_point(segment_start, .8f, true);
@@ -403,7 +403,7 @@ void CoreUI::_draw_ring(const Deck::Ref ref)
                 float white_value = std::min(_size[ref].in_value(), _size[ref].value()) * .95f;
                 ring.set_brightness(.8f);
                 ring.set_hex_color(kWhite);
-                segment_start = deck.norm_start() - white_value * .5f;
+                segment_start = deck.voxs().norm_start() - white_value * .5f;
                 ring.set_segment(segment_start, segment_start + white_value, true);
             }
             else {
