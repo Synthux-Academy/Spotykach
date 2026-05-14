@@ -30,10 +30,12 @@ bool wav_header(
     uint32_t size,
     WavHeader& header,
     size_t& header_size,
-    uint8_t* out_cue_count);
+    uint8_t* out_cue_count,
+    uint32_t cue_limit);
 
 void find_cue_points(
     uint8_t* in_bytes, 
     size_t* out_cue_points, 
-    uint8_t* out_cue_count,  
+    uint8_t* out_cue_count,
+    const uint32_t cue_limit,
     const uint32_t size);

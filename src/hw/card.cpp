@@ -36,8 +36,8 @@ void Card::init_read_audio(AudioData data)
         return;
     }
     
-    if (f_read(&_sdfile, _buffer, kChunk, &bytesread) != FR_OK
-    || !wav_header(_buffer, data.cue_points, kChunk, hdr, hdr_size, data.cue_count)) {
+    if (f_read(&_sdfile, _buffer, kChunk, (UINT*)&bytesread) != FR_OK
+    || !wav_header(_buffer, data.cue_points, kChunk, hdr, hdr_size, data.cue_count, data.body_size)) {
         _state = State::failed;
         _close_file();
         return;
@@ -74,7 +74,7 @@ void Card::read_audio()
     }
     
     size_t bytesread;
-    if (f_read(&_sdfile, _buffer, kChunk, &bytesread) != FR_OK) {
+    if (f_read(&_sdfile, _buffer, kChunk, (UINT* )&bytesread) != FR_OK) {
         _state = State::failed;
         _close_file();
         return;
@@ -88,21 +88,18 @@ void Card::read_audio()
 
     if (bytesread < kChunk || buf_len < bytesread) {
         if (f_lseek(&_sdfile, _hdr_size + _audio_size) == FR_OK 
-         && f_read(&_sdfile, _buffer, kChunk, &bytesread) == FR_OK) {
+         && f_read(&_sdfile, _buffer, kChunk, (UINT* )&bytesread) == FR_OK) {
             find_cue_points(
                 _buffer,
                 _slices,
                 _slice_count,
+                _audio_size / 8,
                 bytesread
             );
             auto end_idx = (int32_t)*_slice_count - 1;
             if (end_idx >= 0 && end_idx < 31 && _slices[end_idx] < _audio_size) {
                 _slices[end_idx + 1] = _size_read_audio;
                 *_slice_count += 1;
-            }
-            for (auto i = 0; i < *_slice_count; i++) {
-                uint32_t slice = _slices[i];
-                volatile auto b = 1;
             }
         }
         _notify_finish_processing = true;
@@ -182,7 +179,7 @@ bool Card::read_file(const char* path, uint8_t*& out_data, size_t* out_size)
         return false;
     }
     
-    if (f_read(&_sdfile, _buffer, kChunk, out_size) != FR_OK) {
+    if (f_read(&_sdfile, _buffer, kChunk, (UINT*)out_size) != FR_OK) {
         _state = State::idle;
         _close_file();
         return false;

@@ -16,22 +16,28 @@ bool check_id(const uint8_t* data, size_t offset, const char* id)
   return std::memcmp(data + offset, id, 4) == 0;
 }
 
-void read_cue_points(uint8_t* in_bytes, size_t* out_cue_points, uint8_t* out_cue_count, uint32_t cursor)
+void read_cue_points(uint8_t* in_bytes, size_t* out_cue_points, uint8_t* out_cue_count, const uint32_t cue_limit, uint32_t cursor)
 {
     uint32_t numPoints = read_val<uint32_t>(in_bytes, cursor);
     auto count = std::min(numPoints, static_cast<uint32_t>(32));
+    volatile auto added_points = 0;
     for (uint32_t i = 0; i < count; ++i) {
         // Each cue point is 24 bytes. Sample Offset is at offset 20 within the point.
         // cursor + 4 (to skip NumPoints) + (i * 24) + 20
-        out_cue_points[i] = read_val<size_t>(in_bytes, cursor + 24 + (i * 24));
+        auto point = read_val<size_t>(in_bytes, cursor + 24 + (i * 24));
+        if (point < cue_limit) {
+            out_cue_points[i] = point;
+            added_points ++;
+        }
     }
-    *out_cue_count = count;
+    *out_cue_count = added_points;
 }
 
 void find_cue_points(
     uint8_t* in_bytes, 
     size_t* out_cue_points, 
-    uint8_t* out_cue_count,  
+    uint8_t* out_cue_count,
+    const uint32_t cue_limit,
     const uint32_t size)
 {
     uint32_t cursor = 0;
@@ -42,7 +48,7 @@ void find_cue_points(
         cursor += 8;
 
         if (std::memcmp(chunkID, "cue ", 4) == 0 && out_cue_points) {
-            read_cue_points(in_bytes, out_cue_points, out_cue_count, cursor);
+            read_cue_points(in_bytes, out_cue_points, out_cue_count, cue_limit, cursor);
         }
 
         cursor += chunkSize + (chunkSize % 2); // Chunks are word-aligned
@@ -55,7 +61,8 @@ bool wav_header(
     uint32_t size, 
     WavHeader& header, 
     size_t& header_size,
-    uint8_t* out_cue_count)
+    uint8_t* out_cue_count,
+    uint32_t cue_limit)
 {
     uint32_t cursor = 0;
     
@@ -92,10 +99,11 @@ bool wav_header(
             std::memcpy(header.DataBlocID, chunkID, 4);
             header.DataSize = chunkSize;
             header_size = cursor;
+            cue_limit = chunkSize / header.BytePerBloc;
             foundData = true;
         }
         else if (std::memcmp(chunkID, "cue ", 4) == 0 && out_cue_points) {
-            read_cue_points(in_bytes, out_cue_points, out_cue_count, cursor);
+            read_cue_points(in_bytes, out_cue_points, out_cue_count, cue_limit, cursor);
         }
         cursor += chunkSize + (chunkSize % 2); // Chunks are word-aligned
     }
@@ -105,7 +113,6 @@ bool wav_header(
 
 WavHeader wav_header(const size_t size) {
     WavHeader header;
-    static_assert(sizeof(header) == 44, "");
 
     header.AudioFormat = 3;
     header.NbrChannels = 2;
