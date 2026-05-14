@@ -147,11 +147,11 @@ void CoreUI::process()
         }
     }
     if (_apply.test(Hardware::CTRL_ENV_A)) {
-        if (is_drift_a) deck_a.voxs().set_size(_env_size[Deck::A].value(), false);
+        if (is_drift_a) deck_a.voxs().set_env_size(_env_size[Deck::A].value());
         deck_a.voxs().set_shape(_env[Deck::A].value());
     }
     if (_apply.test(Hardware::CTRL_ENV_B)) {
-        if (is_drift_b) deck_b.voxs().set_size(_env_size[Deck::B].value(), false);
+        if (is_drift_b) deck_b.voxs().set_env_size(_env_size[Deck::B].value());
         deck_b.voxs().set_shape(_env[Deck::B].value());
     }
     if (_apply.test(Hardware::CTRL_SIZE_A)) {
@@ -166,11 +166,8 @@ void CoreUI::process()
     if (_apply.test(Hardware::CTRL_SIZE_B)) {
         if (is_drift_b) {
             deck_b.voxs().set_win_size(_win[Deck::B].value());
-            deck_b.voxs().set_size(_size[Deck::B].value(), _touched.test(Alt));
         }
-        else {
-            deck_b.voxs().set_size(_size[Deck::B].value(), _touched.test(Alt));
-        }
+        deck_b.voxs().set_size(_size[Deck::B].value(), _touched.test(Alt));
     }
     if (_apply.test(Hardware::CTRL_PITCH_A)) {
         if (_touched.test(FluxA)) {

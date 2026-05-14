@@ -49,6 +49,7 @@ public:
   void set_size(const float, const bool alt);
   void set_size_mod(const float);
   void set_size_mod_on(const bool);
+  void set_env_size(const float);
 
   void set_shape(const float);
   void set_win_size(const float);
@@ -120,6 +121,7 @@ private:
   float _norm_size;
   float _norm_size_offset;
   float _abs_spread;
+  float _env_norm_size;
 
   size_t* _slice_points;
   size_t  _slice_size;

@@ -85,6 +85,10 @@ void Generator::set_size_mod(const float val)
     if (_is_size_mod_on) norm_size_offset = std::abs(val) < 0.01 ? 0 : val;
     _norm_size_offset = norm_size_offset;
 };
+void Generator::set_env_size(const float val)
+{
+  _env_norm_size = val;
+}
 
 void Generator::apply_dimensions()
 {
@@ -106,7 +110,7 @@ void Generator::apply_dimensions()
   auto mode = Config::dynamic().cue_size_mode(ref);
   using CSM = Config::CueSizeMode;
   if (mode != CSM::ignore && _slice_points_count > 1) { /* pre-sliced */
-    auto last_idx = _slice_points_count - 1;
+    auto last_idx = size_t(_slice_points_count - 1);
     auto start_idx = static_cast<size_t>(std::round(norm_start * (last_idx - 1)));
     abs_start = _slice_points[start_idx];
 
@@ -128,15 +132,22 @@ void Generator::apply_dimensions()
 
   _abs_start = abs_start;
   switch (_vox_mode) {
-    case VM::Linear: _abs_size = std::max((size_t)abs_size, kSliceMinSize); break;
-    case VM::Spread: _abs_spread = std::min((size_t)abs_size, kMaxSpread); break;
+    case VM::Linear: 
+      _abs_size = std::max((size_t)abs_size, kSliceMinSize); 
+      break;
+
+    case VM::Spread: 
+      _abs_spread = std::min((size_t)abs_size, kMaxSpread); 
+      _abs_size = std::max((size_t)(_env_norm_size * buffer_size), kSliceMinSize); 
+      break;
   }
 
   for (auto& v: _voxs) {
     if (_cont_start_mod) v.set_start(abs_start);
-    switch (_vox_mode) {
-      case VM::Linear: v.set_size(_abs_size); break;
-      case VM::Spread: v.set_spread(_abs_spread); v.set_full_size(buffer_size); break;
+    v.set_size(_abs_size); 
+    if (_vox_mode == VM::Spread) {
+      v.set_spread(_abs_spread);
+      v.set_full_size(buffer_size); 
     }    
   }
 }
