@@ -61,12 +61,12 @@ public:
   bool set_speed(float);
   void apply_speed() { set_speed(_norm_pitch_speed); }
 
-  void slice();
-  void auto_slice(const size_t slice_size, const size_t slice_count);
-  void clear_slices();
-  void set_snap_to_slice(const bool value) { _snap_to_slice = value; }
-  size_t* slices() const { return _slice_points; }
-  uint8_t* slice_count() { return &_slice_points_count; }
+  void add_cue();
+  void auto_cue(const size_t slice_size, const size_t slice_count);
+  void clear_cue();
+  void set_snap_to_cue(const bool value) { _snap_to_cue = value; }
+  size_t* cue_points() const { return _cue_points; }
+  uint8_t* cue_count() { return &_cue_points_count; }
 
   float increment() const { return _increment; }
 
@@ -123,12 +123,12 @@ private:
   float _abs_spread;
   float _env_norm_size;
 
-  size_t* _slice_points;
   size_t  _slice_size;
-  size_t  _auto_slice_max_idx;
-  uint8_t _slice_points_count;
-  bool    _is_auto_slice;
-  bool    _snap_to_slice;
+  size_t  _auto_cue_max_idx;
+  size_t* _cue_points;
+  uint8_t _cue_points_count;
+  bool    _is_auto_cue;
+  bool    _snap_to_cue;
 
   float _norm_pitch_speed;
 

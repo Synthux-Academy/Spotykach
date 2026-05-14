@@ -18,8 +18,8 @@ _norm_start        { 0.f },
 _norm_start_offset { 0.f },
 _norm_size         { 1.f },
 _norm_size_offset  { 0.f },
-_is_auto_slice     { false },
-_snap_to_slice     { false },
+_is_auto_cue       { false },
+_snap_to_cue       { false },
 _increment         { 1.f },
 _target_increment  { 1.f },
 _speed             { 1.f },
@@ -28,10 +28,10 @@ _speed_mode       { SpeedMode::Tape },
 _reverse          { false }
 {};
 
-void Generator::init(Buffer* buffer, size_t* slice_points) 
+void Generator::init(Buffer* buffer, size_t* cue_points) 
 {
   _buffer = buffer;
-  _slice_points = slice_points;
+  _cue_points = cue_points;
   uint8_t cnt = 0;
   for (auto& v: _voxs) {
     v.init(buffer, cnt);
@@ -71,7 +71,7 @@ float Generator::norm_size() const {
 }
 void Generator::set_size(float norm, const bool alt) 
 {
-  if (!_is_auto_slice && !_slice_points_count) norm *= norm;
+  if (!_is_auto_cue && !_cue_points_count) norm *= norm;
   _norm_size = norm;
   _alt_size = alt;
 }
@@ -109,22 +109,22 @@ void Generator::apply_dimensions()
   
   auto mode = Config::dynamic().cue_size_mode(ref);
   using CSM = Config::CueSizeMode;
-  if (mode != CSM::ignore && _slice_points_count > 1) { /* pre-sliced */
-    auto last_idx = size_t(_slice_points_count - 1);
+  if (mode != CSM::ignore && _cue_points_count > 1) { /* pre-sliced */
+    auto last_idx = size_t(_cue_points_count - 1);
     auto start_idx = static_cast<size_t>(std::round(norm_start * (last_idx - 1)));
-    abs_start = _slice_points[start_idx];
+    abs_start = _cue_points[start_idx];
 
     if (_vox_mode != VM::Spread && ((_alt_size && mode == CSM::free) || (!_alt_size && mode == CSM::snap))) {
       auto delta_idx = static_cast<size_t>(std::round(norm_size * (last_idx - 1))) + 1;
       auto end_idx = start_idx + delta_idx;
       if (end_idx > last_idx) end_idx -= last_idx;
-      auto abs_end = _slice_points[end_idx];
+      auto abs_end = _cue_points[end_idx];
       if (abs_end < abs_start) abs_end += buffer_size;
       if (end_idx != start_idx) abs_size = abs_end - abs_start;
     }
   }
-  else if (_snap_to_slice) { /* slice mode */
-    abs_start = _slice_size * std::round(norm_start * _auto_slice_max_idx);
+  else if (_snap_to_cue) { /* slice mode */
+    abs_start = _slice_size * std::round(norm_start * _auto_cue_max_idx);
   }
   else { /* reel & drift */
     abs_start = norm_start * buffer_size;
@@ -152,25 +152,26 @@ void Generator::apply_dimensions()
   }
 }
 
-void Generator::slice() 
+void Generator::add_cue() 
 {
-  if (_slice_points_count < kMaxSlicePointCount) {
-    auto p = _slice_points + _slice_points_count;
+  if (_cue_points_count < kMaxSlicePointCount) {
+    auto p = _cue_points + _cue_points_count;
     *p = _buffer->read_head();
-    _slice_points_count ++;
+    _cue_points_count ++;
   }
-  _is_auto_slice = false;
+  _is_auto_cue = false;
 }
-void Generator::auto_slice(const size_t slice_size, const size_t slice_count)
+void Generator::auto_cue(const size_t slice_size, const size_t slice_count)
 {
   _slice_size = slice_size;
-  _auto_slice_max_idx = slice_count - 1;
-  _is_auto_slice = true;
+  _auto_cue_max_idx = slice_count - 1;
+  _is_auto_cue = true;
 }
-void Generator::clear_slices()
+void Generator::clear_cue()
 {
-  std::memset(_slice_points, 0, sizeof(size_t) * kMaxSlicePointCount);
-  _is_auto_slice = true;
+  std::memset(_cue_points, 0, sizeof(size_t) * kMaxSlicePointCount);
+  _cue_points_count = 0;
+  _is_auto_cue = true;
 }
 
 void Generator::set_speed_mode(const SpeedMode mode) 

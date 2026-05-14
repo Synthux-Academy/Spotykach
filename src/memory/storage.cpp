@@ -151,8 +151,9 @@ void DeckStorage::load()
     audio_file_name(_slot_idx, name);
     ad.file_name = name;
     
-    ad.cue_points = _deck->voxs().slices();
-    ad.cue_count = _deck->voxs().slice_count();
+    _deck->voxs().clear_cue();
+    ad.cue_points = _deck->voxs().cue_points();
+    ad.cue_count = _deck->voxs().cue_count();
 
     _card->init_read_audio(ad);
     _state = State::loading;

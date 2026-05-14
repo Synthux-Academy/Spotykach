@@ -85,7 +85,7 @@ void Deck::_set_mode(const Mode new_mode)
             g.set_speed_mode(SpeedMode::Tape);
             g.apply_speed();
             g.apply_shape();
-            g.set_snap_to_slice(false);
+            g.set_snap_to_cue(false);
             g.set_start_mod_cont(true);
             g.set_pitch_mod_cont(true);
             if (_needs_kickstart()) _dispatch();
@@ -98,7 +98,7 @@ void Deck::_set_mode(const Mode new_mode)
             g.apply_speed();
             g.apply_pitch();
             g.apply_shape();
-            g.set_snap_to_slice(true);
+            g.set_snap_to_cue(true);
             g.set_start_mod_cont(false);
             g.set_pitch_mod_cont(false);
             _make_grid();
@@ -111,7 +111,7 @@ void Deck::_set_mode(const Mode new_mode)
             g.set_speed_mode(SpeedMode::Tape);
             g.apply_speed();
             g.apply_shape();
-            g.set_snap_to_slice(false);
+            g.set_snap_to_cue(false);
             g.set_start_mod_cont(true);
             g.set_pitch_mod_cont(true);
             break;
@@ -153,6 +153,7 @@ void Deck::_set_buf_armed(const bool on)
     _is_armed = on;
     if (on) {
         _buffer.clear();
+        _generator.clear_cue();
         switch (_mode) {
             case Mode::Reel: _detector.set_armed(true); break;
             case Mode::Slice: _is_record_queued = true; break;
@@ -251,7 +252,7 @@ void Deck::_make_grid()
     _max_loop_ticks = _mode == Mode::Slice ? std::round(ticks) : ticks;
     _loop_tick_count = -1;
     _through_loop_ticks = -1;
-    _generator.auto_slice(_start_step_kof / _record_tempo, _max_loop_ticks * .5f); //_max_loop_ticks are in 16ths
+    _generator.auto_cue(_start_step_kof / _record_tempo, _max_loop_ticks * .5f); //_max_loop_ticks are in 16ths
 }
 void Deck::_quantize_loop(const float norm_size) 
 {
