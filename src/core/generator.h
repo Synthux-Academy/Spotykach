@@ -44,7 +44,8 @@ public:
   void set_start_mod(const float);
   void set_start_mod_on(const bool);
   void set_start_mod_cont(const bool val) { _cont_start_mod = val; }; // If set to false (default), start is applied once at the beginning of the slice
-  void set_start_offset_interval(const uint8_t);
+  void set_start_offset_interval(const float norm);
+  uint8_t start_offset_interval() const { return _offset_interval; }
 
   float norm_size() const;
   void set_size(const float, const bool alt);

@@ -65,9 +65,9 @@ void Generator::set_start_mod(const float val)
     if (_is_start_mod_on) norm_start_offset = std::abs(val) < 0.01 ? 0 : val;
     _norm_start_offset = norm_start_offset;
 }
-void Generator::set_start_offset_interval(const uint8_t value)
+void Generator::set_start_offset_interval(const float norm)
 {
-  _offset_interval = value;
+  _offset_interval = std::round(norm * kStartOffsetMaxInterval);
 }
 void Generator::reset_start_offset()
 {

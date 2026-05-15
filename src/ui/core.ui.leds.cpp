@@ -337,6 +337,9 @@ void CoreUI::_draw_ring(const Deck::Ref ref)
     else if (_is_changing(_size_quarters[ref])) {
         _show_size_quarters(ref, default_color);
     }
+    else if (_is_changing(_pos_offset[ref])) {
+        _show_start_offset_interval(ref, default_color);
+    }
     else if (_touched.test(ref == Deck::A ? GritA : GritB)) {
         auto fx_color = grit_color(deck.fx().grit_mode());
         _show_value(_grit_intens[ref], ring, fx_color, ValueDisplay::Always);
@@ -545,6 +548,14 @@ void CoreUI::_show_size_quarters(const Deck::Ref ref, const uint32_t color)
     auto steps = 1 + round(_size_quarters[ref].value() * 15);
     for (uint8_t i = 0; i < steps; i++) {
         _ring[ref].set_point_hex_color(i % 4 ? color : kWhite);
+        _ring[ref].set_point(i * 2 + 4, .7f);
+    }
+}
+void CoreUI::_show_start_offset_interval(const Deck::Ref ref, const uint32_t color)
+{  
+    auto steps = 1 + round(_pos_offset[ref].value() * kStartOffsetMaxInterval);
+    for (uint8_t i = 0; i < steps; i++) {
+        _ring[ref].set_point_hex_color(i == 0 ? kWhite : color);
         _ring[ref].set_point(i * 2 + 4, .7f);
     }
 }

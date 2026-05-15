@@ -95,6 +95,7 @@ private:
     void _show_slots(const Deck::Ref);
     void _show_key_intervals();
     void _show_size_quarters(const Deck::Ref, const uint32_t color);
+    void _show_start_offset_interval(const Deck::Ref, const uint32_t color);
     void _show_error(const Deck::Ref);
     
     void _show_empty(const Deck::Ref);
@@ -173,6 +174,7 @@ private:
     std::array<MValue, Deck::Count> _feedback;
     std::array<MValue, Deck::Count> _speed;
     std::array<MValue, Deck::Count> _pos;
+    std::array<MValue, Deck::Count> _pos_offset;
     std::array<MValue, Deck::Count> _size;
     std::array<MValue, Deck::Count> _env;
     std::array<MValue, Deck::Count> _env_size;

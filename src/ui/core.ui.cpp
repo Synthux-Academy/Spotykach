@@ -59,6 +59,7 @@ void CoreUI::_init_values()
         
         auto& deck = _core.deck(ref);
         _pos[ref].set(0.f);
+        _pos_offset[ref].set(0.f);
         _size[ref].set(1.f);
         _speed[ref].set(.5f);
         _mix[ref].set(.5f);
@@ -134,6 +135,9 @@ void CoreUI::process()
         if (_touched.test(FluxA)) {
             deck_a.fx().set_flux_fb(_flux_fb[Deck::A].value());
         }
+        else if (_touched.test(Alt)) {
+            deck_a.voxs().set_start_offset_interval(_pos[Deck::A].value());
+        }
         else {
             deck_a.voxs().set_start(_pos[Deck::A].value());
         }
@@ -141,6 +145,9 @@ void CoreUI::process()
     if (_apply.test(Hardware::CTRL_POS_B)) {
         if (_touched.test(FluxB)) {
             deck_b.fx().set_flux_fb(_flux_fb[Deck::B].value());
+        }
+        else if (_touched.test(Alt)) {
+            deck_b.voxs().set_start_offset_interval(_pos[Deck::B].value());
         }
         else {
             deck_b.voxs().set_start(_pos[Deck::B].value());
@@ -399,7 +406,10 @@ void CoreUI::_process_ui_queue()
                     break;
 
                 case Hardware::CTRL_POS_A:
-                    _pos[Deck::A].process(val, !fx_a_touched, changing_id_a);
+                    _pos[Deck::A].process(val, !fx_a_touched && !is_alt_touched, changing_id_a);
+                    if (deck_a.voxs().has_cue()) {
+                        _pos_offset[Deck::A].process(val, !fx_a_touched && is_alt_touched, changing_id_a);
+                    }
                     _flux_fb[Deck::A].process(val, _touched.test(FluxA), changing_id_a);
                     break;
 
@@ -475,6 +485,9 @@ void CoreUI::_process_ui_queue()
 
                 case Hardware::CTRL_POS_B:
                     _pos[Deck::B].process(val, !fx_b_touched, changing_id_b);
+                    if (deck_b.voxs().has_cue()) {
+                        _pos_offset[Deck::B].process(val, !fx_b_touched && is_alt_touched, changing_id_b);
+                    }
                     _flux_fb[Deck::B].process(val, _touched.test(FluxB), changing_id_b);
                     break;
 

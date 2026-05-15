@@ -459,7 +459,9 @@ const Event* Deck::_internal_event(const bool common_tick, const bool track_tick
         /* that's where the looping in Slice is happening */
         auto kickstart = _loop_tick_count < 0 || _needs_kickstart();
         if (_adjust_count) {
-            _loop_tick_count = _through_loop_ticks;
+            if (!_generator.start_offset_interval()) {
+                _loop_tick_count = _through_loop_ticks;
+            }
             _adjust_count = false;
         }
         else {
