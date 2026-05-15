@@ -311,6 +311,7 @@ void Deck::stop()
     _is_playing = false;
     _loop_tick_count = -1;
     _through_loop_ticks = -1;
+    _generator.reset_start_offset();
     _dispatcher.all_off();
     _track.rewind();
 }

@@ -44,6 +44,7 @@ public:
   void set_start_mod(const float);
   void set_start_mod_on(const bool);
   void set_start_mod_cont(const bool val) { _cont_start_mod = val; }; // If set to false (default), start is applied once at the beginning of the slice
+  void set_start_offset_interval(const uint8_t);
 
   float norm_size() const;
   void set_size(const float, const bool alt);
@@ -61,6 +62,7 @@ public:
   bool set_speed(float);
   void apply_speed() { set_speed(_norm_pitch_speed); }
 
+  bool has_cue() const { return _cue_points_count || _snap_to_cue; }
   void add_cue();
   void auto_cue(const size_t slice_size, const size_t slice_count);
   void clear_cue();
@@ -88,6 +90,7 @@ protected:
   void set_mode(const Vox::Mode);
 
   void apply_dimensions();
+  void reset_start_offset();
 
   bool is_reverse() const { return _reverse; }
   void set_reverse(const bool);
@@ -127,8 +130,13 @@ private:
   size_t  _auto_cue_max_idx;
   size_t* _cue_points;
   uint8_t _cue_points_count;
+  uint8_t _cue_size_delta;
   bool    _is_auto_cue;
   bool    _snap_to_cue;
+
+  uint8_t _offset;
+  int8_t _offset_count;
+  uint8_t _offset_interval;
 
   float _norm_pitch_speed;
 

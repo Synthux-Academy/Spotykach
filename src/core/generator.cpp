@@ -37,6 +37,7 @@ void Generator::init(Buffer* buffer, size_t* cue_points)
     v.init(buffer, cnt);
     cnt ++;
   }
+  reset_start_offset();
 };
 
 void Generator::set_mode(const Vox::Mode value)
@@ -63,6 +64,15 @@ void Generator::set_start_mod(const float val)
     auto norm_start_offset = 0.f;
     if (_is_start_mod_on) norm_start_offset = std::abs(val) < 0.01 ? 0 : val;
     _norm_start_offset = norm_start_offset;
+}
+void Generator::set_start_offset_interval(const uint8_t value)
+{
+  _offset_interval = value;
+}
+void Generator::reset_start_offset()
+{
+  _offset_count = -1;
+  _offset = 0;
 }
 
 float Generator::norm_size() const {
@@ -112,11 +122,13 @@ void Generator::apply_dimensions()
   if (mode != CSM::ignore && _cue_points_count > 1) { /* pre-sliced */
     auto last_idx = size_t(_cue_points_count - 1);
     auto start_idx = static_cast<size_t>(std::round(norm_start * (last_idx - 1)));
+    start_idx += _offset;
+    start_idx %= last_idx;
     abs_start = _cue_points[start_idx];
 
     if (_vox_mode != VM::Spread && ((_alt_size && mode == CSM::free) || (!_alt_size && mode == CSM::snap))) {
-      auto delta_idx = static_cast<size_t>(std::round(norm_size * (last_idx - 1))) + 1;
-      auto end_idx = start_idx + delta_idx;
+      _cue_size_delta = static_cast<size_t>(std::round(norm_size * (last_idx - 1))) + 1;
+      auto end_idx = start_idx + _cue_size_delta;
       if (end_idx > last_idx) end_idx -= last_idx;
       auto abs_end = _cue_points[end_idx];
       if (abs_end < abs_start) abs_end += buffer_size;
@@ -124,7 +136,10 @@ void Generator::apply_dimensions()
     }
   }
   else if (_snap_to_cue) { /* slice mode */
-    abs_start = _slice_size * std::round(norm_start * _auto_cue_max_idx);
+    _cue_size_delta = abs_size / _slice_size;
+    auto start_idx = static_cast<uint32_t>(std::round(norm_start * _auto_cue_max_idx) + _offset);
+    start_idx %= (_auto_cue_max_idx + 1);
+    abs_start = _slice_size * start_idx;
   }
   else { /* reel & drift */
     abs_start = norm_start * buffer_size;
@@ -259,6 +274,14 @@ void Generator::set_reverse(const bool value)
 void Generator::trigger(const uint8_t vox_idx, const Event* event) 
 {
   auto& v = _voxs[vox_idx];
+
+  if ((_cue_points_count || _snap_to_cue) && _offset_interval) {
+    if (++_offset_count >= _offset_interval) {
+      _offset_count = 0;
+      _offset += _cue_size_delta;
+      apply_dimensions();
+    }
+  }
 
   if (!_cont_start_mod) v.set_start(_abs_start);
 
