@@ -556,7 +556,7 @@ void CoreUI::_show_start_offset_interval(const Deck::Ref ref, const uint32_t col
     auto steps = 1 + round(_pos_offset[ref].value() * kStartOffsetMaxInterval);
     for (uint8_t i = 0; i < steps; i++) {
         _ring[ref].set_point_hex_color(i == 0 ? kWhite : color);
-        _ring[ref].set_point(i * 2 + 4, .7f);
+        _ring[ref].set_point(i * 3 + 4, .7f);
     }
 }
 void CoreUI::_show_error(const Deck::Ref ref)

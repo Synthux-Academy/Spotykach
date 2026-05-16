@@ -136,7 +136,7 @@ void Generator::apply_dimensions()
     }
   }
   else if (_snap_to_cue) { /* slice mode */
-    _cue_size_delta = abs_size / _slice_size;
+    _cue_size_delta = static_cast<uint8_t>(std::max(abs_size / _slice_size, 1.f));
     auto start_idx = static_cast<uint32_t>(std::round(norm_start * _auto_cue_max_idx) + _offset);
     start_idx %= (_auto_cue_max_idx + 1);
     abs_start = _slice_size * start_idx;

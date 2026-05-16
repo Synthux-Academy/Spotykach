@@ -270,6 +270,7 @@ void DeckStorage::process()
             else { 
                 if (_card->notify_finish_processing()) {
                     _deck->buffer().set_rec_size(_card->size_audio());
+                    if (_deck->mode() == Mode::Slice) _deck->make_grid();
                     if (!_is_preloading && Config::dynamic().is_preload_on()) _save_preload_source();
                 }
                 _is_preloading = false;

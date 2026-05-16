@@ -66,6 +66,8 @@ public:
     bool is_overdubbing() const { return is_playing() && is_recording(); }
     bool is_empty() const { return _buffer.is_empty(); }
 
+    void make_grid();
+
     void clear_sequence();
     
     void tick(const bool common_tick, const bool is_key);
@@ -107,7 +109,6 @@ private:
 
     void _resolve_in_out_mix();
 
-    void _make_grid();
     void _quantize_loop(const float);
     
     void _resolve_playhead();
