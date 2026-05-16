@@ -110,56 +110,6 @@ void Buffer::read_linear(float frame, float& out0, float& out1)
     out1 = a1 + frac_fr * (n1 - a1);  
 };
 
-void Buffer::read_cubic(float frame, float& out0, float& out1) 
-{
-    // Wrap negative
-    while (frame < 0) frame += _size;
-
-    // Take integer part of the frame
-    auto int_fr = static_cast<size_t>(frame);
-
-    // Take fractional part
-    auto frac_fr = frame - int_fr;
-    
-    // Read the buffer
-    auto a0_m1 = 0.f;
-    auto a1_m1 = 0.f;
-    if (int_fr > 0) {
-        auto ph_m1 = int_fr - 1;
-        _read(ph_m1, a0_m1, a1_m1);
-        _read_head = int_fr - 1;
-    }
-    else {
-        _read_head = int_fr;
-    }
-    auto ph_p1 = int_fr + 1;
-    auto ph_p2 = int_fr + 2;
-
-    auto a0 = 0.f;
-    auto a1 = 0.f;
-    auto a0_p1 = 0.f;
-    auto a1_p1 = 0.f;
-    auto a0_p2 = 0.f;
-    auto a1_p2 = 0.f;
-    
-    _read(int_fr, a0, a1);
-    _read(ph_p1, a0_p1, a1_p1);
-    _read(ph_p2, a0_p2, a1_p2);
-    
-    auto c0_0 = a0;
-    auto c0_1 = a1;
-    auto c1_0 = .5f * (a0_p1 - a0_m1);
-    auto c1_1 = .5f * (a1_p1 - a1_m1);
-    auto c2_0 = a0_m1 - 2.5f * a0 + 2.f * a0_p1 - .5f * a0_p2;
-    auto c2_1 = a1_m1 - 2.5f * a1 + 2.f * a1_p1 - .5f * a1_p2;
-    auto c3_0 = .5f * (a0_p2 - a0_m1) + 1.5f * (a0 - a0_p1);
-    auto c3_1 = .5f * (a1_p2 - a1_m1) + 1.5f * (a1 - a1_p1);
-
-    // Interpolate
-    out0 = (((c3_0 * frac_fr + c2_0) * frac_fr + c1_0) * frac_fr + c0_0);
-    out1 = (((c3_1 * frac_fr + c2_1) * frac_fr + c1_1) * frac_fr + c0_1);
-};
-
 void Buffer::_read(size_t frame, float& out0, float& out1) {
     frame %= _size;
     auto f = _buffer[frame];
