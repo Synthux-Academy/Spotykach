@@ -136,7 +136,7 @@ void CoreUI::process()
             deck_a.fx().set_flux_fb(_flux_fb[Deck::A].value());
         }
         else if (_touched.test(Alt)) {
-            deck_a.voxs().set_start_offset_interval(_pos[Deck::A].value());
+            deck_a.voxs().set_start_offset_interval(_pos_offset[Deck::A].value());
         }
         else {
             deck_a.voxs().set_start(_pos[Deck::A].value());
