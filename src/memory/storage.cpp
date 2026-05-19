@@ -97,6 +97,8 @@ void DeckStorage::_read_slots()
 
 void DeckStorage::save()
 {
+    if (_deck->is_empty()) return;
+
     Card::AudioData ad;
     
     auto audio = _deck->buffer().raw();
