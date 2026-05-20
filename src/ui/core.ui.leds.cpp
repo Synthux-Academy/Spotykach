@@ -7,20 +7,20 @@ using namespace infrasonic;
 using namespace daisy;
 using namespace daisysp;
 
-static const uint32_t kWhite    = 0xffffff;
-static const uint32_t kPink     = 0xff00ff;
-static const uint32_t kRed      = 0xff0000;
-static const uint32_t kBlue     = 0x0000ff;
-static const uint32_t kGreen    = 0x00ff00;
-static const uint32_t kTurq     = 0x00FFEF;
-static constexpr int kReelColor     = 0xf7941d;
-static constexpr int kSliceColor    = 0x0064ff;
-static constexpr int kDriftColor    = 0xc850ff;
-static constexpr int kDelayColor    = 0xFF6565;
-static constexpr int kSoftFxColor   = 0xFFD524;
-static constexpr int kHarshFxColor  = 0xFF9A24;
+static constexpr uint32_t kWhite    = 0xffffff;
+static constexpr uint32_t kPink     = 0xff00ff;
+static constexpr uint32_t kRed      = 0xff0000;
+static constexpr uint32_t kBlue     = 0x0000ff;
+static constexpr uint32_t kGreen    = 0x00ff00;
+static constexpr uint32_t kTurq     = 0x00FFEF;
+static constexpr uint32_t kReelColor     = 0xf7941d;
+static constexpr uint32_t kSliceColor    = 0x0064ff;
+static constexpr uint32_t kDriftColor    = 0xc850ff;
+static constexpr uint32_t kDelayColor    = 0xFF6565;
+static constexpr uint32_t kSoftFxColor   = 0xFFD524;
+static constexpr uint32_t kHarshFxColor  = 0xFF9A24;
 
-static uint32_t kTapeColor[kStorageSlotCount] = {
+static constexpr std::array<uint32_t, kStorageSlotCount> kTapeColor = {
     // Lexicographically ordered colors, 
     // so the folders on the card going 
     // to be in the same order when sorted 
@@ -32,7 +32,7 @@ static uint32_t kTapeColor[kStorageSlotCount] = {
     kTurq,    //T urquoise
     0xffDE21  //Y ellow
 };
-static uint32_t source_color(Driver& d) 
+static uint32_t clock_source_color(Driver& d) 
 {
     switch (d.source()) {
         case Driver::Source::internal: return kGreen;
@@ -41,9 +41,9 @@ static uint32_t source_color(Driver& d)
         default: return kWhite;
     }
 }
-uint32_t clock_color(Driver& d, const bool is_key)
+static uint32_t clock_color(Driver& d, const bool is_key)
 {
-    uint32_t src_color = source_color(d);
+    uint32_t src_color = clock_source_color(d);
     if (is_key) { 
         if (d.is_key_at_quarter()) return d.is_external_sync() ? src_color : kWhite; 
         return d.is_key_sub_quarter() ? src_color : kWhite;
@@ -52,11 +52,11 @@ uint32_t clock_color(Driver& d, const bool is_key)
         return src_color; 
     }
 }
-uint32_t count_in_color(const bool is_key)
+static uint32_t count_in_color(const bool is_key)
 {
     return is_key ? kWhite : kGreen;
 }
-uint32_t mode_color(const spotykach::Mode mode)
+static uint32_t mode_color(const spotykach::Mode mode)
 {
     switch (mode) {
         case spotykach::Mode::Slice:    return kSliceColor;
@@ -64,7 +64,7 @@ uint32_t mode_color(const spotykach::Mode mode)
         default:                       return kReelColor;
     };
 }
-uint32_t grit_color(const Fx::GritMode mode)
+static uint32_t grit_color(const Fx::GritMode mode)
 {
       switch (mode) {
         case Fx::GritMode::Reduce: return kHarshFxColor;
@@ -104,8 +104,12 @@ void CoreUI::_draw_leds()
     _led[Hardware::LED_GRIT_A].set(_hw);
     _led[Hardware::LED_FLUX_A].set(_hw);
     _hw.leds.Set(Hardware::LED_FADER_A, kWhite, 1.f - _core.mix());
-    
-    auto cycle_a_color = _core.mod(Deck::A).type() == Modulator::Type::Follow ? mode_color_a : kWhite;
+
+    auto clck_src_color = clock_source_color(_core.driver());
+
+    auto cycle_a_color = kWhite;
+    if (_core.mod(Deck::A).type() == Modulator::Type::Follow) cycle_a_color = mode_color_a;
+    else if (_core.mod(Deck::A).is_synced()) cycle_a_color = clck_src_color;
     _hw.leds.Set(Hardware::LED_CYCLE_A, cycle_a_color, _lfo_a);
 
     auto mode_color_b = mode_color(deck_b.mode());
@@ -113,7 +117,9 @@ void CoreUI::_draw_leds()
     _led[Hardware::LED_FLUX_B].set(_hw);
     _hw.leds.Set(Hardware::LED_FADER_B, kWhite, _core.mix());
 
-    auto cycle_b_color = _core.mod(Deck::B).type() == Modulator::Type::Follow ? mode_color_b : kWhite;
+    auto cycle_b_color = kWhite;
+    if (_core.mod(Deck::B).type() == Modulator::Type::Follow) cycle_b_color = mode_color_b;
+    else if (_core.mod(Deck::B).is_synced()) cycle_b_color = clck_src_color;
     _hw.leds.Set(Hardware::LED_CYCLE_B, cycle_b_color, _lfo_b);
 
     switch (_core.route()) {
@@ -123,7 +129,7 @@ void CoreUI::_draw_leds()
     }
 
     if (_clock_led_on || _clock_source_changed) {
-        auto color = _clock_source_changed ? source_color(_core.driver()) : clock_color(_core.driver(), _show_key_quarter);
+        auto color = _clock_source_changed ? clck_src_color : clock_color(_core.driver(), _show_key_quarter);
         _hw.leds.Set(Hardware::LED_CLOCK_IN, color, 1.f);
     }
 
@@ -540,8 +546,8 @@ void CoreUI::_show_key_intervals()
     }
     uint32_t color;
     for (uint8_t i = 0; i < steps; i++) {
-        if (i == 0) color = _core.driver().is_key_sub_quarter() ? source_color(_core.driver()) : kWhite;
-        else color = source_color(_core.driver());
+        if (i == 0) color = _core.driver().is_key_sub_quarter() ? clock_source_color(_core.driver()) : kWhite;
+        else color = clock_source_color(_core.driver());
         _ring[Deck::A].set_point_hex_color(color);
         _ring[Deck::A].set_point(i * step + 4, i % 4 && interval != KI::k1_16 ? .25f : .7f);
     }

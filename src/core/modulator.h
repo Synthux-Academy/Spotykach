@@ -26,6 +26,7 @@ public:
     void set_speed_norm(const float, const bool sync); //also follower speed
     void set_amp_norm(const float);
 
+    bool is_synced() const { return _is_synced; }
     void tick(const float tempo, const bool is_quarter);
 
     void follow(const float);
