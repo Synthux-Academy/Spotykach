@@ -20,7 +20,7 @@ static constexpr uint32_t kDelayColor    = 0xFF6565;
 static constexpr uint32_t kSoftFxColor   = 0xFFD524;
 static constexpr uint32_t kHarshFxColor  = 0xFF9A24;
 
-static constexpr std::array<uint32_t, kStorageSlotCount> kTapeColor = {
+static constexpr std::array<uint32_t, kStorageTapeCount> kTapeColor = {
     // Lexicographically ordered colors, 
     // so the folders on the card going 
     // to be in the same order when sorted 
@@ -224,6 +224,18 @@ void CoreUI::_draw_play(const Deck::Ref ref, const bool blink)
     auto revId = ref == Deck::A ? Hardware::LED_REV_A : Hardware::LED_REV_B;
     _led[playId].off();
     _led[revId].off();
+
+    auto& storage = _storage.of(ref);
+    if (storage.is_selecting()) {
+        if (_touched.test(Alt)) {
+            if (storage.can_load()) _led[revId].on(kTapeColor[storage.selected_tape_idx()]);
+            _led[playId].on(kWhite);
+        }
+        else if (storage.can_load()) {
+            _led[playId].on(kTapeColor[storage.selected_tape_idx()]);
+        }
+        return;
+    }
     if (deck.is_playing() || (deck.is_play_queued() && _clock_led_on)) { 
         auto ledId = deck.is_reverse() ? revId : playId;
         _led[ledId].on(color);
@@ -569,7 +581,6 @@ void CoreUI::_show_error(const Deck::Ref ref)
     }
 }
 
-//
 void CoreUI::_breathe_led()
 {
     _led_breathe_phase += .0005f; 

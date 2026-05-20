@@ -15,6 +15,7 @@ static const std::string kMemory = "SK/MEM";
 
 class Storage;
 
+static constexpr uint8_t kStorageTapeCount = 6;
 static constexpr uint8_t kStorageSlotCount = 6;
 
 class DeckStorage {
@@ -55,6 +56,7 @@ public:
     uint8_t selected_tape_idx() const { return _tape_idx; }
     
     Slot slot_at(const uint8_t idx) const { return _slots[idx]; }
+    bool can_load() const { return _slot_idx != kNone && !_slots[_slot_idx].is_empty; }
     uint8_t selected_slot_idx() const { return _slot_idx; }
     void select_slot_at(const uint8_t idx) { _slot_idx = idx; }
     void reset_recent_slot() { _recent_slot_idx = kNone; }

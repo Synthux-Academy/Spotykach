@@ -100,7 +100,6 @@ private:
     void _show_empty(const Deck::Ref);
     void _show_gate_in(const Deck::Ref);
 
-    void _set_led(const uint16_t ring, const uint16_t idx, const int color, const float brightness);
     void _breathe_led();
 
     struct LED {
