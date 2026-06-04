@@ -63,9 +63,6 @@ private:
   
   void _resolve_mix();
 
-  static constexpr uint8_t kNotesCount = 7;
-  static constexpr uint8_t kVoxCount = 4;
-
   std::array<Deck, Deck::Count> _decks;
   std::array<Modulator, Deck::Count> _mod;
   Driver  _driver;
@@ -79,8 +76,6 @@ private:
 
   Route _route;
 
-  std::array<float, 2> _reverb_in;
-  std::array<float, 2> _reverb_out;
   std::array<float, 2> _bus;
 
   float _click_mix;
