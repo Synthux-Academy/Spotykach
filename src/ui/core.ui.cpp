@@ -431,7 +431,7 @@ void CoreUI::_process_ui_queue()
 
                 case Hardware::CTRL_PITCH_A: {
                     if (_storage.of(Deck::A).state() == DeckStorage::State::selecting) {
-                        _storage.of(Deck::A).select_slot_at(val * kStorageSlotCount);
+                        _storage.of(Deck::A).select_slot_at(std::round(val * (kStorageSlotCount - 1)));
                         break;
                     }
 
@@ -509,7 +509,7 @@ void CoreUI::_process_ui_queue()
                 
                 case Hardware::CTRL_PITCH_B: {                    
                     if (_storage.of(Deck::B).state() == DeckStorage::State::selecting) {
-                        _storage.of(Deck::B).select_slot_at(val * kStorageSlotCount);
+                        _storage.of(Deck::B).select_slot_at(std::round(val * (kStorageSlotCount - 1)));
                         break;
                     }
 

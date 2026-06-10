@@ -95,6 +95,11 @@ void DeckStorage::_read_slots()
     _slot_idx = _tape_idx == _recent_tape_idx ? _recent_slot_idx : kNone;
 }
 
+void DeckStorage::select_slot_at(const uint8_t idx) { 
+    if (idx >= kStorageSlotCount) return;
+    _slot_idx = idx; 
+}
+
 void DeckStorage::save()
 {
     if (_deck->is_empty()) return;
