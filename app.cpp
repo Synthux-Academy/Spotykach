@@ -132,7 +132,7 @@ void AppImpl::Init()
 
     StartT5Callback(T5Callback, 250);
 
-    _hw.StartAdcs();
+    
     _hw.StartDAC(DACCallback);
 
     auto& audio = _hw.seed.audio_handle;

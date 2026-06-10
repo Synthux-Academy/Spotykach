@@ -26,7 +26,8 @@ _clock_led_on       { false },
 _tap_was_tapped     { false }
 {};
 
-void CoreUI::init() {
+void CoreUI::init() 
+{
     _hw.StartAdcs();
 
     _blink_timer.Init();
