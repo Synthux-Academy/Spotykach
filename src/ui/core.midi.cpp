@@ -1,7 +1,7 @@
 #include "core.midi.h"
-#include "config.h"
+#include "core/config.h"
 #include "daisy.h"
-#include "config.h"
+#include "core/config.h"
 #include "expose.h"
 
 using namespace spotykach;
@@ -54,8 +54,8 @@ void CoreMIDI::_process_note_on(daisy::NoteOnEvent& note_on)
 {
     auto ref = Deck::Count;
     auto& c = Config::dynamic();
-    if (note_on.channel == c.midi_channel_a()) ref = Deck::A;
-    else if (note_on.channel == c.midi_channel_b()) ref = Deck::B;
+    if (note_on.channel == c.midi_channel(Deck::A)) ref = Deck::A;
+    else if (note_on.channel == c.midi_channel(Deck::B)) ref = Deck::B;
     if (ref != Deck::Count && _on_note_on) {
         _on_note_on(ref, note_on.note);
     }
@@ -70,14 +70,14 @@ bool CoreMIDI::_process_realtime(daisy::MidiEvent& event)
         case SystemRealTimeType::Start:
         case SystemRealTimeType::Continue: {
             _core.driver().reset();
-            if (c.midi_play_stop_a() && !_core.deck(Deck::A).is_empty()) _core.deck(Deck::A).play();
-            if (c.midi_play_stop_b() && !_core.deck(Deck::B).is_empty()) _core.deck(Deck::B).play();    
+            if (c.midi_play_stop(Deck::A) && !_core.deck(Deck::A).is_empty()) _core.deck(Deck::A).play();
+            if (c.midi_play_stop(Deck::B) && !_core.deck(Deck::B).is_empty()) _core.deck(Deck::B).play();    
             break;
         }
 
         case SystemRealTimeType::Stop: {
-            if (c.midi_play_stop_a()) _core.deck(Deck::A).stop();
-            if (c.midi_play_stop_b()) _core.deck(Deck::B).stop();
+            if (c.midi_play_stop(Deck::A)) _core.deck(Deck::A).stop();
+            if (c.midi_play_stop(Deck::B)) _core.deck(Deck::B).stop();
             break;
         }
 
@@ -91,11 +91,11 @@ void CoreMIDI::_process_cc(daisy::ControlChangeEvent& event)
 {
     auto ref = Deck::Count;
     auto& c = Config::dynamic();
-    if (event.channel == c.midi_channel_a()) ref = Deck::A;
-    else if (event.channel == c.midi_channel_b()) ref = Deck::B;
+    if (event.channel == c.midi_channel(Deck::A)) ref = Deck::A;
+    else if (event.channel == c.midi_channel(Deck::B)) ref = Deck::B;
 
     switch (event.control_number) {
-        case CC::XFade: break;
+        case CC::CrossFade: break;
         case CC::RecExt: if (event.value > 0) _handle_record(ref, false); break;
         case CC::RecInt: if (event.value > 0) _handle_record(ref, true); break;
         case CC::Start: break;

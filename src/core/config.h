@@ -76,4 +76,30 @@ static constexpr float kDefaultFeedback = 0.95f; //-3db at -60...0dB scale
 // Cue points ...................................
 static constexpr uint8_t kMaxSlicePointCount = 32;
 
-}
+// MIDI ..........................................
+enum CC: uint8_t {
+    CrossFade   = 3,
+    RecExt      = 14,
+    RecInt      = 15,
+    Start       = 20,
+    Size        = 21,
+    Env         = 22,
+    Pitch       = 23,
+    IOMix       = 24,
+    DeckFB      = 25,
+    EnvSize     = 26,
+    WinSize     = 27,
+    Fwd         = 85,
+    Rev         = 86,
+    ModCycle    = 89,
+    ModGlow     = 90,
+    GritOn      = 102,
+    GritIntens  = 103,
+    GritMix     = 104,
+    FluxOn      = 105,
+    FluxIntes   = 106,
+    FluxFB      = 107,
+    FluxMix     = 108   
+};
+
+};
