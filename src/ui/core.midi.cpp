@@ -1,6 +1,7 @@
 #include "core.midi.h"
 #include "config.h"
 #include "daisy.h"
+#include "config.h"
 #include "expose.h"
 
 using namespace spotykach;
@@ -86,31 +87,6 @@ bool CoreMIDI::_process_realtime(daisy::MidiEvent& event)
     return false;
 }
 
-enum CC: uint8_t {
-    XFade       = 3,
-    RecExt      = 14,
-    RecInt      = 15,
-    Start       = 20,
-    Size        = 21,
-    Env         = 22,
-    Pitch       = 23,
-    IOMix       = 24,
-    DeckFB      = 25,
-    EnvSize     = 26,
-    WinSize     = 27,
-    Fwd         = 85,
-    Rev         = 86,
-    ModCycle    = 89,
-    ModGlow     = 90,
-    GritOn      = 102,
-    GritIntens  = 103,
-    GritMix     = 104,
-    FluxOn      = 105,
-    FluxIntes   = 106,
-    FluxFB      = 107,
-    FluxMix     = 108   
-};
-
 void CoreMIDI::_process_cc(daisy::ControlChangeEvent& event)
 {
     auto ref = Deck::Count;
@@ -120,8 +96,8 @@ void CoreMIDI::_process_cc(daisy::ControlChangeEvent& event)
 
     switch (event.control_number) {
         case CC::XFade: break;
-        case CC::RecExt: _handle_record(ref, false); break;
-        case CC::RecInt: _handle_record(ref, true); break;
+        case CC::RecExt: if (event.value > 0) _handle_record(ref, false); break;
+        case CC::RecInt: if (event.value > 0) _handle_record(ref, true); break;
         case CC::Start: break;
         case CC::Size: break;
         case CC::Env: break;
