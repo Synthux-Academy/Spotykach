@@ -185,20 +185,8 @@ void CoreUI::_on_play_touch(const Deck::Ref ref, const bool reverse)
         return;
     }
     
-    if (_touched.test(Alt)) {
-        auto src = reverse ? Deck::Source::internal : Deck::Source::external;
-        _core.set_source(src, ref);
-        deck.toggle_recording();
-        _storage.of(ref).reset_recent_slot();
-    }
-    else {
-        deck.disarm();
-        if (deck.is_empty()) _show_empty(ref);
-        if (!deck.is_overdubbing() && (!deck.is_playing() || deck.is_reverse() == reverse)) {
-            _core.driver().toggle_play(ref);
-        }
-        deck.set_reverse(reverse);
-    }
+    if (_touched.test(Alt)) _toggle_record(ref, reverse);
+    else _toggle_play(ref, reverse);
 }
 
 void CoreUI::_on_alt_touch() 

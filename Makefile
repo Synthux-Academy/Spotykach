@@ -1,5 +1,5 @@
 # Config Options
-# DEBUG=1
+DEBUG=1
 
 ifeq ($(DEBUG), 1)
 C_DEFS += -DINFS_LOG=1

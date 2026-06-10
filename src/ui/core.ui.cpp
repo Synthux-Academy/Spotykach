@@ -16,6 +16,7 @@ static float snapped_speed(const float speed)
 CoreUI::CoreUI(Hardware& hw, Core& core, Settings& settings, Storage& storage):
 _hw                 { hw },
 _core               { core },
+_midi               { CoreMIDI(hw, core) },
 _settings           { settings },
 _storage            { storage },
 _calibrator         { Calibrator(hw, settings) },
@@ -48,11 +49,17 @@ void CoreUI::init() {
     auto on_clock_out = std::bind(&CoreUI::_process_clock_out, this);
     _core.driver().set_on_clock_out(on_clock_out);
 
+    auto on_play = std::bind(&CoreUI::_toggle_play, this, _1, _2);
+    auto on_record = std::bind(&CoreUI::_toggle_record, this, _1, _2);
+    auto on_note = std::bind(&CoreUI::_on_midi_note_on, this, _1, _2);
+    _midi.set_on_play(on_play);
+    _midi.set_on_record(on_record);
+    _midi.set_on_note_on(on_note);
+
     _speed_map.init();
 
     for (int i = 0; i < Hardware::LED_LAST; i++) _led[i].init(i);
 };
-
 void CoreUI::_init_values()
 {
     for (auto ref: { Deck::A, Deck::B }) {
@@ -263,7 +270,7 @@ void CoreUI::process()
     }
 };
 
-// CV ///////////////////////////////////////
+// Inputs ........................................
 void CoreUI::read_cv() {
     auto& deck_a = _core.deck(Deck::A);
 
@@ -305,8 +312,6 @@ void CoreUI::read_cv() {
     auto cor_mix_mod = _calibrator.correct(Hardware::CV_CROSSFADE, mix_mod);
     _core.mix_mod_in(cor_mix_mod);
 }
-
-// Gate /////////////////////////////////////
 void CoreUI::process_gate_in()
 { 
     if (_storage.of(Deck::A).is_idle()) {
@@ -348,7 +353,7 @@ void CoreUI::_process_gate_out(const Deck::Ref ref)
     }
 }
 
-// Knobs ////////////////////////////////////
+// Knobs & Switches ..............................
 void CoreUI::_process_ui_queue()
 {
     auto& deck_a = _core.deck(Deck::A); 
@@ -537,8 +542,6 @@ void CoreUI::_process_ui_queue()
         }
     }
 }
-
-// Switchess ////////////////////////////////
 void CoreUI::_process_switches() 
 {
     auto& deck_a = _core.deck(Deck::A);
@@ -655,33 +658,89 @@ void CoreUI::_process_switches()
     }
 }
 
-// Clock /////////////////////////////////////
+// Clock ..........................................
+static bool clock_state = false;
+void CoreUI::tick()
+{
+    auto&d = _core.driver();
+    auto new_state = false;
+    auto midi_state = _midi.process();
+    switch (d.source()) {
+        case Driver::Source::ts4: new_state = _hw.GetClockInputState(); break;
+        case Driver::Source::midi: new_state = midi_state; break;
+        default: break;
+    }
+    d.tick(new_state && !clock_state);
+    clock_state = new_state;
+}
 void CoreUI::_on_quarter(const bool is_key_quarter) 
 {
     _clock_led_on = true;
     _show_key_quarter = is_key_quarter;
 }
-
-// Calibration //////////////////////////////
-void CoreUI::calibrate(const bool recalibrate) {
-    _calibrator.init(recalibrate);
-}
-
-bool CoreUI::_is_changing(const MValue& value) const
-{
-    return _changing_value_id[Deck::A] == value.id() || _changing_value_id[Deck::B] == value.id();
-}
-
-void CoreUI::_reset_changing_value_id()
-{
-   _changing_value_id.fill(0);
-   _clock_source_changed = false;
-}
-
 void CoreUI::_set_tempo_by_size(const Deck::Ref ref, const float fraction)
 {
     auto bpm = _core.deck(ref).tempo_to_fit(fraction);
     auto norm = Tempo::abs_to_norm(bpm); 
     _tempo.set(norm);
     _core.driver().set_tempo_norm(norm);
+}
+void CoreUI::_process_clock_out()
+{
+    _midi.send_clock();
+}
+
+// Calibration .....................................
+void CoreUI::calibrate(const bool recalibrate) {
+    _calibrator.init(recalibrate);
+}
+
+// Track value .....................................
+bool CoreUI::_is_changing(const MValue& value) const
+{
+    return _changing_value_id[Deck::A] == value.id() || _changing_value_id[Deck::B] == value.id();
+}
+void CoreUI::_reset_changing_value_id()
+{
+   _changing_value_id.fill(0);
+   _clock_source_changed = false;
+}
+
+// Play & Record ...................................
+void CoreUI::_toggle_play(const Deck::Ref ref, const bool reverse)
+{
+    if (!_storage.of(ref).is_idle()) return;
+
+    auto& deck = _core.deck(ref);
+    deck.disarm();
+    if (deck.is_empty()) _show_empty(ref);
+    if (!deck.is_overdubbing() && (!deck.is_playing() || deck.is_reverse() == reverse)) {
+        _core.driver().toggle_play(ref);
+    }
+    deck.set_reverse(reverse);
+}
+void CoreUI::_toggle_record(const Deck::Ref ref, const bool internal)
+{
+    if (!_storage.of(ref).is_idle()) return;
+
+    auto& deck = _core.deck(ref);
+    auto src = internal ? Deck::Source::internal : Deck::Source::external;
+    _core.set_source(src, ref);
+    deck.toggle_recording();
+    _storage.of(ref).reset_recent_slot();
+}
+void CoreUI::_trigger(const Deck::Ref ref, const float speed, const bool discont) 
+{
+    auto e = make_event();
+    e.discont = discont;
+    e.p3 = speed;
+    e.p3_on = true;
+    _core.deck(ref).trigger(&e);
+    _show_gate_in(ref);
+}
+
+// MIDI ............................................
+void CoreUI::_on_midi_note_on(const Deck::Ref ref, const uint8_t num)
+{
+    _trigger(ref, _speed_map.bipolar_pitch2speed(num - 60), true);
 }

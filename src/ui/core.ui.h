@@ -8,6 +8,7 @@
 
 #include "../common.h"
 #include "color.h"
+#include "core.midi.h"
 #include "hw/hardware.h"
 #include "core/core.h"
 #include "memory/storage.h"
@@ -18,7 +19,6 @@
 #include "calibrator.h"
 #include "time.iterval.h"
 #include "led.ring.h"
-#include "../core/lutsinosc.h"
 
 namespace spotykach { 
 
@@ -39,19 +39,19 @@ public:
 
     void init();
     void process();
+
     void tick();
+    void process_gate_in();
     void read_cv();
-
-    void render_leds();
-
-    void set_lfo(const float a, const float b)  {
+    void set_lfo(const float a, const float b)  
+    {
         _lfo_a = a;
         _lfo_b = b;
     }
 
+    void render_leds();
+    
     void calibrate(const bool recalibrate);
-
-    void process_gate_in();
 
 private:
     NOCOPY(CoreUI)
@@ -66,10 +66,8 @@ private:
 
     void _process_ui_queue();
     void _process_switches();
+    
     void _process_gate_out(const Deck::Ref);
-    bool _process_midi();
-    bool _process_realtime(daisy::MidiEvent&);
-    void _process_note_on(daisy::NoteOnEvent&);
 
     void _on_pad_touch(Hardware::Pad pad);
     void _on_pad_release(Hardware::Pad pad);
@@ -80,9 +78,12 @@ private:
     void _on_quarter(const bool /*is key quarter*/);
     void _set_tempo_by_size(const Deck::Ref, const float fraction);
 
+    void _toggle_play(const Deck::Ref, const bool reverse);
+    void _toggle_record(const Deck::Ref, const bool internal);
     void _trigger(const Deck::Ref, const float speed, const bool discont = false);
+    void _on_midi_note_on(const Deck::Ref, const uint8_t num);
 
-    // LEDs ////////////////////////////////////////
+    // LEDs ...............................................
     void _draw_leds();
     void _draw_launching();
 
@@ -150,9 +151,11 @@ private:
 
     Hardware& _hw;
     Core& _core;
+    CoreMIDI _midi;
     Settings& _settings;
     Storage& _storage;
     Calibrator _calibrator;
+    
 
     daisy::UiEventQueue _ui_queue;
     daisy::PotMonitor<Hardware, Hardware::kNumAnalogControls> _pot_monitor;
