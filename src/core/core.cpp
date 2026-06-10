@@ -12,8 +12,6 @@ Core::Core():
 _driver { Driver(_decks[Deck::A], _decks[Deck::B], _click, _panner, _mod.data()) }
 {
     _source.fill(Deck::Source::external);
-    _reverb_in.fill(0);
-    _reverb_out.fill(0);
     _bus.fill(0);
     _xfade.SetStage(.5f);
 };
