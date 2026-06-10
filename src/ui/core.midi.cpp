@@ -106,8 +106,8 @@ void CoreMIDI::_process_cc(daisy::ControlChangeEvent& event)
         case CC::DeckFB: break;
         case CC::EnvSize: break;
         case CC::WinSize: break;
-        case CC::Fwd: _handle_play(ref, event.value > 0, false); break;
-        case CC::Rev: _handle_play(ref, event.value > 0, true); break;
+        case CC::Fwd: if (event.value > 0) _handle_play(ref, false); break;
+        case CC::Rev: if (event.value > 0) _handle_play(ref, true); break;
         case CC::ModCycle: break;
         case CC::ModGlow: break;
         case CC::GritOn: break;
@@ -121,12 +121,9 @@ void CoreMIDI::_process_cc(daisy::ControlChangeEvent& event)
     }
 
 }
-void CoreMIDI::_handle_play(const Deck::Ref ref, const bool on, const bool reverse)
+void CoreMIDI::_handle_play(const Deck::Ref ref, const bool reverse)
 {
-    auto& deck = _core.deck(ref);
-    if (on != deck.is_playing() || reverse != deck.is_reverse()) {
-        if (_on_play) _on_play(ref, reverse);
-    }
+    if (_on_play) _on_play(ref, reverse);
 }
  
 void CoreMIDI::_handle_record(const Deck::Ref ref, const bool internal)

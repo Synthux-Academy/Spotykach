@@ -32,7 +32,7 @@ private:
     bool _process_realtime(daisy::MidiEvent&);
     void _process_note_on(daisy::NoteOnEvent&);
     void _process_cc(daisy::ControlChangeEvent&);
-    void _handle_play(const Deck::Ref, const bool on, const bool reverse);
+    void _handle_play(const Deck::Ref, const bool reverse);
     void _handle_record(const Deck::Ref, const bool internal);
 
     std::function<void(const Deck::Ref, const uint8_t num)> _on_note_on;
