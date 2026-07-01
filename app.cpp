@@ -10,8 +10,6 @@
 #include "memory/storage.h"
 #include "expose.h"
 
-#define STORAGE
-
 // #define METER
 #ifdef METER
 #include "meter.h"
@@ -120,10 +118,9 @@ void AppImpl::Init()
     _hw.Init(sample_rate, block_size);
     _core.init(sample_rate, block_size);
     _ui.init();
-    #ifdef STORAGE
+    
     _storage.init(_core.deck(Deck::A), _core.deck(Deck::B));
     _storage.read_settigs();
-    #endif
 
     Log::StartLog(false);
 #if DEBUG
@@ -160,9 +157,7 @@ void AppImpl::Loop()
         }
 
         _ui.process();
-        #ifdef STORAGE
         _storage.process();
-        #endif
         
         #if DEBUG
         if(_log_timer.HasPassedMs(250))
