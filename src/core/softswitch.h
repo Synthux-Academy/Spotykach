@@ -52,7 +52,7 @@ public:
 
         case Stage::rise:
           if (!_on) _stage = Stage::fall;
-          else _out = Hann_Value_At(_iterator * _kof);
+          else _out = bleeptools::Hann::win().point(_iterator * _kof);
           if (++_iterator >= 191) _stage = Stage::hold;
           break;
 
@@ -64,7 +64,7 @@ public:
 
         case Stage::fall:
           if (_on) _stage = Stage::rise;
-          else _out = Hann_Value_At(_iterator * _kof);
+          else _out = bleeptools::Hann::win().point(_iterator * _kof);
           if (--_iterator <= 0) _stage = Stage::idle;
           break;
         }
