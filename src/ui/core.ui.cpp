@@ -536,7 +536,7 @@ void CoreUI::_process_switches()
         last_tap_update = now;
         is_tap_tapped = sr2.test(6);
     }
-    if(is_tap_tapped) {
+    if (is_tap_tapped) {
         if (_tap_was_tapped) return;
         _tap_was_tapped = true;
         
@@ -559,7 +559,7 @@ void CoreUI::_process_switches()
             auto& d = _core.driver();
             if (!d.is_external_sync()) {
                 d.tap_tempo();
-                _tempo.set(Tempo::abs_to_norm(d.tempo()));
+                _tempo.set(Tempo::abs_to_norm(d.tempo()), false);
             }
             if (!_tap_hold.is_holding()) {
                 _tap_hold.begin();

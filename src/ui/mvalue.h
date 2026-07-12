@@ -26,11 +26,11 @@ float value() {
   return _value; 
 }
 
-void set(const float value) {
+void set(const float value, const bool apply = true) {
   _is_tracking = false;
   _is_active = false;
   _value = value;
-  _apply = true;
+  _apply = apply;
 }
 
 private:
