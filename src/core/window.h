@@ -155,11 +155,11 @@ private:
 
     float _attenuation() {
       if (_iterator < kWindowSlope) {
-        return _is_first ? 1.f :  Hann_Value_At(_iterator * kSlopeKof); //use fade-in of the slice
+        return _is_first ? 1.f :  bleeptools::Hann::win().point(_iterator * kSlopeKof); //use fade-in of the slice
       }
       
       if (_iterator > _slope_out_start) {
-        return Hann_Value_At((_size - _iterator - 1) * kSlopeKof);
+        return bleeptools::Hann::win().point((_size - _iterator - 1) * kSlopeKof);
       }
       
       return 1.f;

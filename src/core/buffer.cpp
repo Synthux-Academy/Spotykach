@@ -126,12 +126,12 @@ void Buffer::write(const float in0, const float in1)
         case State::idle: return;
         case State::sustain: break;
         case State::fadein:
-            fade = Hann_Value_At(_fade_counter * kFadeCurveKof);
+            fade = bleeptools::Hann::win().point(_fade_counter * kFadeCurveKof);
             if (++_fade_counter == kRecordFade - 1) _state = State::sustain;
             break;
 
         case State::fadeout:
-            fade = Hann_Value_At(_fade_counter * kFadeCurveKof);
+            fade = bleeptools::Hann::win().point(_fade_counter * kFadeCurveKof);
             if (--_fade_counter == 0) {
                 cut();
                 _state = State::idle;

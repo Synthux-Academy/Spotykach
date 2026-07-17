@@ -83,7 +83,7 @@ void Vox::_decay() {
 void Vox::process(float& out0, float& out1) {
     out0 = 0.f;
     out1 = 0.f;
-    _att = Hann_Value_At(_slope_counter * kSlopeKof);
+    _att = bleeptools::Hann::win().point(_slope_counter * kSlopeKof);
     switch (_state) {
     case State::idle: return;
     case State::attack:
