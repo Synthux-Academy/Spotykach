@@ -86,9 +86,9 @@ void CoreUI::_init_values()
         auto& fx = deck.fx();
         _grit_mix[ref].set(fx.grit().mix());
         _grit_intens[ref].set(fx.grit().intensity());
-        _flux_mix[ref].set(fx.flux().mix());
-        _flux_intens[ref].set(fx.flux().intensity());
-        _flux_fb[ref].set(fx.flux().fb());
+        _flux_mix[ref].set(fx.flux().mix_norm());
+        _flux_intens[ref].set(fx.flux().time_norm());
+        _flux_fb[ref].set(fx.flux().fb_norm());
     }
 
     _pan_range.set(.6f);
@@ -145,10 +145,10 @@ void CoreUI::process()
         if (_mix[ref].apply()) deck.set_inout_mix(_mix[ref].value());
         if (_feedback[ref].apply()) deck.set_feedback(_feedback[ref].value());
 
-        if (_flux_fb[ref].apply()) deck.fx().flux().set_fb(_flux_fb[ref].value());
-        if (_flux_intens[ref].apply()) deck.fx().flux().set_intensity(_flux_intens[ref].value());
+        if (_flux_fb[ref].apply()) deck.fx().flux().set_fb_norm(_flux_fb[ref].value());
+        if (_flux_intens[ref].apply()) deck.fx().flux().set_time_norm(_flux_intens[ref].value());
         if (_grit_intens[ref].apply()) deck.fx().grit().set_intensity(_grit_intens[ref].value());
-        if (_flux_mix[ref].apply()) deck.fx().flux().set_mix(_flux_mix[ref].value());
+        if (_flux_mix[ref].apply()) deck.fx().flux().set_mix_norm(_flux_mix[ref].value());
         if (_grit_mix[ref].apply()) deck.fx().grit().set_mix(_grit_mix[ref].value());
 
         if (_mod_speed[ref].apply()) _core.mod(ref).set_speed_norm(_mod_speed[ref].value(), _touched.test(Alt));

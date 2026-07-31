@@ -9,11 +9,6 @@ namespace spotykach {
 
 class Fx {
 public:
-    enum class DelayMode: uint8_t {
-        Free,
-        Clocked
-    };
-
     struct Params {
         float sample_rate;
         float** delay_buf;

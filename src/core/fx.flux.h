@@ -11,34 +11,46 @@ public:
     static constexpr uint8_t kDelayMaxSeconds           { 5 };
     static constexpr size_t kEchoDelayBufferLength      { 48000 * kDelayMaxSeconds };
 
+    enum class DelayMode: uint8_t {
+        Free,
+        Clocked
+    };
+
     Flux();
     ~Flux() = default;
 
     void init(const float sample_rate, float** delay_buf);
     void process(float& inout0, float& inout1, const float send);
 
-    float intensity() const { return _int; };
-    void set_intensity(const float norm);
+    float time_norm() const { return _time_norm; };
+    void set_time_norm(const float norm);
 
-    float mix() const { return _mix_norm; };
-    void set_mix(const float norm);
+    float mix_norm() const { return _mix_norm; };
+    void set_mix_norm(const float norm);
 
-    float fb() const { return _fb; };
-    void set_fb(const float norm);
+    float fb_norm() const { return _fb_norm; };
+    void set_fb_norm(const float norm);
+
+    void set_delay_mode(const DelayMode);
+    void set_tempo_bpm(const float);
 
 private:
     NOCOPY(Flux)
 
     void _apply_fb();
     void _apply_mix();
-    void _apply_int(const bool hard = false);
+    void _apply_time(const bool hard = false);
 
+    
     infrasonic::EchoDelay<kEchoDelayBufferLength> _echo_delay[2];
 
-    float _int;
+    float _time_norm;
     float _mix;
     float _mix_norm;
-    float _fb;
+    float _fb_norm;
+    float _tempo_bpm;
+
+    DelayMode _delay_mode;
 };
 
 };
