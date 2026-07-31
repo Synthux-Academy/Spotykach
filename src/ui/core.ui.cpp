@@ -84,11 +84,11 @@ void CoreUI::_init_values()
         _hold_clear[ref].init();
 
         auto& fx = deck.fx();
-        _grit_mix[ref].set(fx.grit_mix());
-        _grit_intens[ref].set(fx.grit_intensity());
-        _flux_mix[ref].set(fx.flux_mix());
-        _flux_intens[ref].set(fx.flux_intensity());
-        _flux_fb[ref].set(fx.flux_fb());
+        _grit_mix[ref].set(fx.grit().mix());
+        _grit_intens[ref].set(fx.grit().intensity());
+        _flux_mix[ref].set(fx.flux().mix());
+        _flux_intens[ref].set(fx.flux().intensity());
+        _flux_fb[ref].set(fx.flux().fb());
     }
 
     _pan_range.set(.6f);
@@ -145,11 +145,11 @@ void CoreUI::process()
         if (_mix[ref].apply()) deck.set_inout_mix(_mix[ref].value());
         if (_feedback[ref].apply()) deck.set_feedback(_feedback[ref].value());
 
-        if (_flux_fb[ref].apply()) deck.fx().set_flux_fb(_flux_fb[ref].value());
-        if (_flux_intens[ref].apply()) deck.fx().set_flux_intensity(_flux_intens[ref].value());
-        if (_grit_intens[ref].apply()) deck.fx().set_grit_intensity(_grit_intens[ref].value());
-        if (_flux_mix[ref].apply()) deck.fx().set_flux_mix(_flux_mix[ref].value());
-        if (_grit_mix[ref].apply()) deck.fx().set_grit_mix(_grit_mix[ref].value());
+        if (_flux_fb[ref].apply()) deck.fx().flux().set_fb(_flux_fb[ref].value());
+        if (_flux_intens[ref].apply()) deck.fx().flux().set_intensity(_flux_intens[ref].value());
+        if (_grit_intens[ref].apply()) deck.fx().grit().set_intensity(_grit_intens[ref].value());
+        if (_flux_mix[ref].apply()) deck.fx().flux().set_mix(_flux_mix[ref].value());
+        if (_grit_mix[ref].apply()) deck.fx().grit().set_mix(_grit_mix[ref].value());
 
         if (_mod_speed[ref].apply()) _core.mod(ref).set_speed_norm(_mod_speed[ref].value(), _touched.test(Alt));
         if (_mod_amp[ref].apply()) _core.mod(ref).set_amp_norm(_mod_amp[ref].value());
@@ -546,14 +546,14 @@ void CoreUI::_process_switches()
             _value_display_timeout.start();
         } 
         else if (_touched.test(GritA)) {
-            deck_a.fx().switch_grit_mode();
-            _grit_intens[Deck::A].set(deck_a.fx().grit_intensity());
-            _grit_mix[Deck::A].set(deck_a.fx().grit_mix());
-        } 
+            deck_a.fx().grit().switch_mode();
+            _grit_intens[Deck::A].set(deck_a.fx().grit().intensity());
+            _grit_mix[Deck::A].set(deck_a.fx().grit().mix());
+        }
         else if (_touched.test(GritB)) {
-            deck_b.fx().switch_grit_mode();
-            _grit_intens[Deck::B].set(deck_b.fx().grit_intensity());
-            _grit_mix[Deck::B].set(deck_b.fx().grit_mix());
+            deck_b.fx().grit().switch_mode();
+            _grit_intens[Deck::B].set(deck_b.fx().grit().intensity());
+            _grit_mix[Deck::B].set(deck_b.fx().grit().mix());
         }
         else {
             auto& d = _core.driver();

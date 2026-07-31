@@ -63,10 +63,10 @@ static uint32_t mode_color(const spotykach::Mode mode)
         default:                       return kReelColor;
     };
 }
-static uint32_t grit_color(const Fx::GritMode mode)
+static uint32_t grit_color(const Grit::Mode mode)
 {
       switch (mode) {
-        case Fx::GritMode::Reduce: return kHarshFxColor;
+        case Grit::Mode::Reduce: return kHarshFxColor;
         default: return kSoftFxColor;
     }
 }
@@ -212,7 +212,7 @@ void CoreUI::_draw_fx(const Deck::Ref ref)
     auto& fx = _core.deck(ref).fx();
     auto grit_id = ref == Deck::A ? Hardware::LED_GRIT_A : Hardware::LED_GRIT_B;
     auto flux_id = ref == Deck::A ? Hardware::LED_FLUX_A : Hardware::LED_FLUX_B;
-    _led[grit_id].on(grit_color(fx.grit_mode()), fx.is_grit_on() ? 1.f : 0.5f);
+    _led[grit_id].on(grit_color(fx.grit().mode()), fx.is_grit_on() ? 1.f : 0.5f);
     _led[flux_id].on(kDelayColor, fx.is_flux_on() ? 1.f : 0.5f);
 }
 void CoreUI::_draw_play(const Deck::Ref ref, const bool blink)
@@ -341,7 +341,7 @@ void CoreUI::_draw_ring(const Deck::Ref ref)
         _show_start_offset_interval(ref, default_color);
     }
     else if (_touched.test(ref == Deck::A ? GritA : GritB)) {
-        auto fx_color = grit_color(deck.fx().grit_mode());
+        auto fx_color = grit_color(deck.fx().grit().mode());
         _show_value(_grit_intens[ref], ring, fx_color, ValueDisplay::Always);
         _show_value(_grit_mix[ref], ring, fx_color);
     }
