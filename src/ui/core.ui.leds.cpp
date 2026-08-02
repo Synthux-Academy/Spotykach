@@ -213,7 +213,12 @@ void CoreUI::_draw_fx(const Deck::Ref ref)
     auto grit_id = ref == Deck::A ? Hardware::LED_GRIT_A : Hardware::LED_GRIT_B;
     auto flux_id = ref == Deck::A ? Hardware::LED_FLUX_A : Hardware::LED_FLUX_B;
     _led[grit_id].on(grit_color(fx.grit().mode()), fx.is_grit_on() ? 1.f : 0.5f);
-    _led[flux_id].on(kDelayColor, fx.is_flux_on() ? 1.f : 0.5f);
+    
+    
+    auto flux_mode = fx.flux().mode();
+    auto flux_bright = flux_mode == Flux::Mode::FreeDelay ? 1.f : _clock_led_on;
+
+    _led[flux_id].on(kDelayColor, fx.is_flux_on() ? flux_bright : 0.5f);
 }
 void CoreUI::_draw_play(const Deck::Ref ref, const bool blink)
 {

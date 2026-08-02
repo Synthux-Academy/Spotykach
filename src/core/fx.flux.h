@@ -11,9 +11,9 @@ public:
     static constexpr uint8_t kDelayMaxSeconds           { 5 };
     static constexpr size_t kEchoDelayBufferLength      { 48000 * kDelayMaxSeconds };
 
-    enum class DelayMode: uint8_t {
-        Free,
-        Clocked
+    enum class Mode: uint8_t {
+        FreeDelay,
+        ClockedDelay
     };
 
     Flux();
@@ -31,7 +31,8 @@ public:
     float fb_norm() const { return _fb_norm; };
     void set_fb_norm(const float norm);
 
-    void set_delay_mode(const DelayMode);
+    void switch_mode();
+    Mode mode() const { return _mode; }
     void set_tempo_bpm(const float);
 
 private:
@@ -40,7 +41,7 @@ private:
     void _apply_fb();
     void _apply_mix();
     void _apply_time(const bool hard = false);
-
+    void _set_mode(const Mode);
     
     infrasonic::EchoDelay<kEchoDelayBufferLength> _echo_delay[2];
 
@@ -50,7 +51,7 @@ private:
     float _fb_norm;
     float _tempo_bpm;
 
-    DelayMode _delay_mode;
+    Mode _mode;
 };
 
 };

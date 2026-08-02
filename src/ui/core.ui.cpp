@@ -555,6 +555,12 @@ void CoreUI::_process_switches()
             _grit_intens[Deck::B].set(deck_b.fx().grit().intensity());
             _grit_mix[Deck::B].set(deck_b.fx().grit().mix());
         }
+        else if (_touched.test(FluxA)) {
+            deck_a.fx().flux().switch_mode();
+        }
+        else if (_touched.test(FluxB)) {
+            deck_b.fx().flux().switch_mode();
+        }
         else {
             auto& d = _core.driver();
             if (!d.is_external_sync()) {
