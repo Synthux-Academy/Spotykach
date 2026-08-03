@@ -2,7 +2,7 @@
 
 #include "nocopy.h"
 #include "daisysp.h"
-#include "xfade.h"
+#include "../xfade.h"
 
 namespace spotykach {
 

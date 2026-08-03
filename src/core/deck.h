@@ -9,7 +9,7 @@
 #include "divider.h"
 #include "dispatcher.h"
 #include "xfade.h"
-#include "fx.h"
+#include "fx/fx.h"
 #include "smooth.h"
 #include "daisysp.h"
 

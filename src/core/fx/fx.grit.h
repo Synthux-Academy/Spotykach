@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../nocopy.h"
+#include "nocopy.h"
 #include "fx.drive.h"
 #include "fx.reduce.h"
 

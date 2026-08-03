@@ -6,7 +6,7 @@
 #include <bitset>
 #include <array>
 
-#include "../common.h"
+#include "common.h"
 #include "color.h"
 #include "core.midi.h"
 #include "hw/hardware.h"

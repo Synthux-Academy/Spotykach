@@ -1,9 +1,9 @@
 #pragma once
 
-#include "../nocopy.h"
+#include "nocopy.h"
 #include "fx.grit.h"
 #include "fx.flux.h"
-#include "softswitch.h"
+#include "../softswitch.h"
 
 namespace spotykach {
 

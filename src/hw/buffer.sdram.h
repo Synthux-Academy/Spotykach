@@ -6,7 +6,7 @@
 #include "nocopy.h"
 #include "../core/track.h"
 #include "../core/detector.h"
-#include "../core/fx.h"
+#include "../core/fx/fx.h"
 #include "../core/buffer.h"
 #include "card.h"
 
