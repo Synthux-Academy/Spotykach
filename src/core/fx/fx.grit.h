@@ -3,6 +3,7 @@
 #include "nocopy.h"
 #include "fx.drive.h"
 #include "fx.reduce.h"
+#include "filter.h"
 
 namespace spotykach {
 
@@ -10,7 +11,8 @@ class Grit {
 public:
     enum class Mode: uint8_t {
         Drive,
-        Reduce
+        Reduce,
+        Filter
     };
 
     Grit() = default;
@@ -33,6 +35,7 @@ private:
 
     Drive _drive;
     Reduce _reduce;
+    Filter _filter;
 
     Mode _mode { Mode::Drive };
 };

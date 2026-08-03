@@ -67,6 +67,7 @@ static uint32_t grit_color(const Grit::Mode mode)
 {
       switch (mode) {
         case Grit::Mode::Reduce: return kHarshFxColor;
+        case Grit::Mode::Filter: return kGreen;
         default: return kSoftFxColor;
     }
 }
