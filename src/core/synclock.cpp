@@ -34,7 +34,7 @@ void SynClock::set_ppqn_in(const uint32_t value)
 
 void SynClock::set_tempo(const float tempo) {
     // Check for change larger than 2nd decimal digit
-    if (fabsf(tempo - _manual_tempo) >= .01f) return;
+    if (fabsf(tempo - _manual_tempo) < .01f) return;
     //Below 0.05 -> external clock: (val - 0.05) / (1 - 0.05)
     //TODO can fold and optimize a bit
     _manual_tempo = tempo;
