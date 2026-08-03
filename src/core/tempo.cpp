@@ -17,8 +17,8 @@ void Tempo::tap()
     auto time = System::GetNow();
     if (_prev_time != 0) {
         auto diff = time - _prev_time;
-        if (diff < .6f * _avg || diff > 1.4f * _avg) {
-            _avg = diff;
+        if (_avg > 0 && (diff < .6f * _avg || diff > 1.4f * _avg)) {
+            _avg = 0;
             _pointer = 0;
             _full = false;
             _prev_time = time;

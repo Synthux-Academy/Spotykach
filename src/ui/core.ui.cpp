@@ -527,18 +527,17 @@ void CoreUI::_process_switches()
     deck_b.voxs().set_size_mod_on(sr2.test(0) || !sr2.test(1));
 
     // Manual tempo tap switch
-    // Update no faster than 500Hz
+    // Update no faster than 250Hz
     static auto is_tap_tapped = false;
     static uint32_t last_tap_update = 0;
     uint32_t now = System::GetNow();
-    if(now - last_tap_update >= 2)
+    if(now - last_tap_update >= 4)
     {
         last_tap_update = now;
         is_tap_tapped = sr2.test(6);
     }
     if (is_tap_tapped) {
         if (_tap_was_tapped) return;
-        _tap_was_tapped = true;
         
         if (_touched.test(Alt)) {
             _core.driver().toggle_source();
@@ -574,9 +573,9 @@ void CoreUI::_process_switches()
     }
     else if (_tap_was_tapped) {
         _reset_changing_value_id();
-        _tap_was_tapped = false;
         _tap_hold.end();
     }
+    _tap_was_tapped = is_tap_tapped;
 }
 
 // Clock ..........................................
