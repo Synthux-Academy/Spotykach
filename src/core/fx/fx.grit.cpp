@@ -43,6 +43,21 @@ void Grit::set_intensity(const float norm)
         case Mode::Filter: _filter.set_cutoff(clamp); break;
     }
 }
+float Grit::character()
+{
+    switch (_mode) {
+        case Mode::Filter: return _filter.q();
+        default: return 0.0f;
+    }
+}
+void Grit::set_character(const float norm)
+{
+    auto clamp = fclamp(norm, 0.0f, 1.0f);
+    switch (_mode) {
+        case Mode::Filter: _filter.set_q(clamp); break;
+        default: break;
+    }
+}
 float Grit::mix()
 {
     switch (_mode) {

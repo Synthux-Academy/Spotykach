@@ -27,6 +27,9 @@ public:
     float intensity();
     void set_intensity(const float norm);
 
+    float character();
+    void set_character(const float norm);
+
     float mix();
     void set_mix(const float norm);
 

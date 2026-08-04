@@ -10,8 +10,13 @@ static constexpr float kLpfMaxHz { 20000.f };  // full open
 static constexpr float kHpfMinHz { 20.f };     // full open
 static constexpr float kHpfMaxHz { 4000.f };   // full cut
 
+static constexpr float kFlatQ         { .70710678f }; // default, non-resonant response
+static constexpr float kMaxQ          { 10.f };
+static constexpr float kMaxResonance  { .9f };
+
 Filter::Filter():
-_cutoff_norm { .5f }
+_cutoff_norm    { .5f },
+_q_norm         { 0.f }
 {}
 
 void Filter::init(const float sample_rate)
@@ -28,8 +33,18 @@ void Filter::set_cutoff(const float norm)
     _apply();
 }
 
+void Filter::set_q(const float norm)
+{
+    _q_norm = fclamp(norm, 0.f, kMaxResonance);
+    _apply();
+}
+
 void Filter::_apply()
 {
+    auto q = fmap(_q_norm, kFlatQ, kMaxQ, Mapping::EXP);
+    _lpf.SetQ(q);
+    _hpf.SetQ(q);
+
     if (_cutoff_norm < .5f) {
         _lpf.SetCutoff(fmap(_cutoff_norm * 2.f, kLpfMinHz, kLpfMaxHz, Mapping::LOG));
     }

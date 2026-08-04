@@ -16,6 +16,9 @@ public:
     float cutoff() const { return _cutoff_norm; }
     void set_cutoff(const float norm);
 
+    float q() const { return _q_norm; }
+    void set_q(const float norm);
+
     float mix() const { return _mix.Stage(); }
     void set_mix(const float norm);
 
@@ -31,6 +34,7 @@ private:
     XFade               _mix;
 
     float _cutoff_norm;
+    float _q_norm;
 };
 
 };
