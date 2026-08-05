@@ -101,7 +101,7 @@ enum CC: uint8_t {
     FluxIntes   = 106,
     FluxFB      = 107,
     FluxMix     = 108,
-    GritReso    = 109
+    GritChar    = 109
 };
 
 };

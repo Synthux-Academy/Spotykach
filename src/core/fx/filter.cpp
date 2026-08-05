@@ -71,4 +71,6 @@ void Filter::process(float& inout0, float& inout1)
     }
 
     _mix.Process(inout0, inout1, wet0, wet1, inout0, inout1);
+    inout0 = SoftLimit(inout0);
+    inout1 = SoftLimit(inout1);
 }

@@ -688,7 +688,7 @@ void CoreUI::_on_midi_cc(const Deck::Ref ref, const CC cc, const float val)
         case CC::GritOn:     _core.deck(ref).fx().set_grit_on(val > 0); break;
         case CC::GritIntens: _grit_intens[ref].set(val); break;
         case CC::GritMix:    _grit_mix[ref].set(val);    break;
-        case CC::GritReso:   _grit_char[ref].set(val);   break;
+        case CC::GritChar:   _grit_char[ref].set(val);   break;
         case CC::FluxOn:     _core.deck(ref).fx().set_flux_on(val > 0); break;
         case CC::FluxIntes:  _flux_intens[ref].set(val); break;
         case CC::FluxFB:     _flux_fb[ref].set(val);     break;
