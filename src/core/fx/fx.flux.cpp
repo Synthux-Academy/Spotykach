@@ -31,11 +31,10 @@ void Flux::set_time_norm(const float norm)
     _time_norm = fclamp(norm, 0.f, 1.f);
     _apply_time();
 }
-static constexpr std::array<float, 9> clocked_dly_kof = {
+static constexpr std::array<float, 8> clocked_dly_kof = {
     .125f,  // 1/32
     .25f,   // 1/16,
     .333f,  // 1/8T
-    .5f,    // 1/8,
     .5f,    // 1/8,
     .667f,  // 1/4T
     1.f,    // 1/4,
