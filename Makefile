@@ -1,11 +1,12 @@
 # Config Options
-DEBUG=1
+# DEBUG=1
 
 ifeq ($(DEBUG), 1)
 C_DEFS += -DINFS_LOG=1
 endif
 
 USE_FATFS = 1
+USE_DAISYSP_LGPL = 1
 
 # Project Name
 TARGET = spotykach

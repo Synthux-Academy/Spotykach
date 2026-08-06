@@ -7,6 +7,7 @@
             "defines": [
                 // "_DEBUG",
                 // "DEBUG",
+                "USE_DAISYSP_LGPL",
                 "UNICODE",
                 "_UNICODE",
                 "__arm__",
@@ -42,6 +43,7 @@
             "defines": [
                 // "_DEBUG",
                 // "DEBUG",
+                "USE_DAISYSP_LGPL",
                 "UNICODE",
                 "_UNICODE",
                 "__arm__",

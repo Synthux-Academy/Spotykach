@@ -73,6 +73,10 @@ static uint32_t grit_color(const Grit::Mode mode, const float intensity)
         default:                 return kDriveColor;
     }
 }
+static uint32_t flux_color(const Flux::Mode mode)
+{
+    return mode == Flux::Mode::Reverb ? kTurq : kDelayColor;
+}
 
 void CoreUI::render_leds() 
 {
@@ -219,9 +223,9 @@ void CoreUI::_draw_fx(const Deck::Ref ref)
     _led[grit_id].on(color, fx.is_grit_on() ? 1.f : 0.5f);
     
     auto flux_mode = fx.flux().mode();
-    auto flux_bright = flux_mode == Flux::Mode::FreeDelay ? 1.f : _clock_led_on;
+    auto flux_bright = flux_mode == Flux::Mode::ClockedDelay ? _clock_led_on : 1.f;
 
-    _led[flux_id].on(kDelayColor, fx.is_flux_on() ? flux_bright : flux_bright * .5f);
+    _led[flux_id].on(flux_color(flux_mode), fx.is_flux_on() ? flux_bright : flux_bright * .5f);
 }
 void CoreUI::_draw_play(const Deck::Ref ref, const bool blink)
 {
@@ -360,10 +364,14 @@ void CoreUI::_draw_ring(const Deck::Ref ref)
         _show_value(_grit_mix[ref], ring, fx_color);
     }
     else if (_touched.test(ref == Deck::A ? FluxA : FluxB)) {
-        _show_value(_flux_intens[ref], ring, kDelayColor, ValueDisplay::Always);
-        _show_value(_flux_mix[ref], ring, kDelayColor);
-        _show_value(_flux_fb[ref], ring, kDelayColor);
-    } 
+        auto flux_mode = deck.fx().flux().mode();
+        auto fx_color = flux_color(flux_mode);
+        _show_value(_flux_intens[ref], ring, fx_color, ValueDisplay::Always);
+        _show_value(_flux_mix[ref], ring, fx_color);
+        if (flux_mode != Flux::Mode::Reverb) {
+            _show_value(_flux_fb[ref], ring, fx_color);
+        }
+    }
     else if (deck.is_empty() && !deck.is_armed()) { 
         ring.set_hex_color(default_color);
         ring.set_brightness(_led_breathe_brightness * .5f);
