@@ -19,7 +19,6 @@ void Flux::init(const float sample_rate, float** delay_buf)
         _echo_delay[i].Init(sample_rate, delay_buf[i]);
         _echo_delay[i].SetLagTime(0.5f);
     }
-    _reverb.init(sample_rate);
 
     _apply_time(true);
     _apply_mix();
@@ -55,10 +54,6 @@ void Flux::_apply_time(const bool hard)
             time_s = kof * (60.f / _tempo_bpm);
             break;
         }
-        case Mode::Reverb: {
-            _reverb.set_feedback_norm(_time_norm * .9f);
-            return;
-        }
     }
 
     for (auto& d: _echo_delay) d.SetDelayTime(time_s, hard);
@@ -85,7 +80,7 @@ void Flux::_apply_mix()
 void Flux::switch_mode()
 {
     auto mode_count = 3;
-    Mode modes[mode_count] = { Mode::FreeDelay, Mode::ClockedDelay, Mode::Reverb };
+    Mode modes[mode_count] = { Mode::FreeDelay, Mode::ClockedDelay };
     for (auto i = 0; i < mode_count; i++) {
         if (_mode == modes[i]) {
             _set_mode(modes[(i + 1) % mode_count]);
@@ -108,10 +103,6 @@ void Flux::_set_mode(const Mode mode)
             _apply_time();
             break;
         }
-        case Mode::Reverb: {
-            _apply_time();
-            break;
-        }
     }
 }
 
@@ -124,15 +115,6 @@ void Flux::set_tempo_bpm(const float bpm)
 
 void Flux::process(float& inout0, float& inout1, const float send)
 {
-    if (_mode == Mode::Reverb) {
-        float wet0 = inout0 * send;
-        float wet1 = inout1 * send;
-        _reverb.process(wet0, wet1);
-        inout0 += wet0 * _mix;
-        inout1 += wet1 * _mix;
-        return;
-    }
-
     inout0 += _echo_delay[0].Process(inout0 * send) * _mix;
     inout1 += _echo_delay[1].Process(inout1 * send) * _mix;
 }

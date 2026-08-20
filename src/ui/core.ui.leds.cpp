@@ -75,7 +75,7 @@ static uint32_t grit_color(const Grit::Mode mode, const float intensity)
 }
 static uint32_t flux_color(const Flux::Mode mode)
 {
-    return mode == Flux::Mode::Reverb ? kTurq : kDelayColor;
+    return kDelayColor;
 }
 
 void CoreUI::render_leds() 
@@ -368,9 +368,6 @@ void CoreUI::_draw_ring(const Deck::Ref ref)
         auto fx_color = flux_color(flux_mode);
         _show_value(_flux_intens[ref], ring, fx_color, ValueDisplay::Always);
         _show_value(_flux_mix[ref], ring, fx_color);
-        if (flux_mode != Flux::Mode::Reverb) {
-            _show_value(_flux_fb[ref], ring, fx_color);
-        }
     }
     else if (deck.is_empty() && !deck.is_armed()) { 
         ring.set_hex_color(default_color);

@@ -2,7 +2,6 @@
 
 #include "nocopy.h"
 #include "echo.h"
-#include "reverb.h"
 
 namespace spotykach {
 
@@ -14,8 +13,7 @@ public:
 
     enum class Mode: uint8_t {
         FreeDelay,
-        ClockedDelay,
-        Reverb
+        ClockedDelay
     };
 
     Flux();
@@ -46,7 +44,6 @@ private:
     void _set_mode(const Mode);
     
     infrasonic::EchoDelay<kEchoDelayBufferLength> _echo_delay[2];
-    Reverb _reverb;
 
     float _time_norm;
     float _mix;
