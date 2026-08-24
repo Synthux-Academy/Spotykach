@@ -109,9 +109,9 @@ void Generator::apply_dimensions()
   while (norm_start > 1.f) norm_start -= 1.f;
   while (norm_start < 0.f) norm_start += 1.f;
   
-  volatile auto norm_size = std::clamp((_norm_size + _norm_size_offset) * 1.05f, 0.f, 1.f);
+  auto norm_size = std::clamp((_norm_size + _norm_size_offset) * 1.05f, 0.f, 1.f);
   auto buffer_size = _buffer->rec_size();
-  volatile auto abs_size = 0.f;
+  auto abs_size = 0.f;
 
   using VM = Vox::Mode;
   switch (_vox_mode) {
@@ -143,6 +143,21 @@ void Generator::apply_dimensions()
     auto start_idx = static_cast<uint32_t>(std::round(norm_start * _auto_cue_max_idx) + _offset);
     start_idx %= (_auto_cue_max_idx + 1);
     abs_start = _slice_size * start_idx;
+    if (!_alt_size) {
+      // Snap size to 1/8th by default, except for min and max where it snaps to 1/16th.
+      auto slice_count = static_cast<uint32_t>(std::round(abs_size / _slice_size));  
+      if (slice_count == 0) abs_size = _slice_size * .51f; // +0.01 overmeasure to compensate rounding to ticks
+      else abs_size = slice_count * _slice_size + 0.01f;   // +0.01 overmeasure to compensate rounding to ticks
+      if (buffer_size - abs_size < _slice_size * .5f) {
+        abs_size = abs_size + _slice_size * .5f;
+        abs_size = std::min(static_cast<size_t>(abs_size), buffer_size);
+      }
+    }
+    else {
+      auto half_slice = _slice_size * .5f;
+      auto slice_count = static_cast<uint32_t>(std::round(abs_size / half_slice));  
+      abs_size = slice_count * half_slice + 0.01f;
+    }
   }
   else { /* reel & drift */
     abs_start = norm_start * buffer_size;
