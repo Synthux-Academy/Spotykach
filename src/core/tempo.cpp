@@ -17,14 +17,13 @@ void Tempo::tap()
     auto time = System::GetNow();
     if (_prev_time != 0) {
         auto diff = time - _prev_time;
-        if (_avg > 0 && (diff < .6f * _avg || diff > 1.4f * _avg)) {
+        if ((diff > 60000.f / kMin)) {
             _avg = 0;
             _pointer = 0;
             _full = false;
             _prev_time = time;
             return;
-        }                              
-
+        }
         _times[_pointer] = diff;
         _pointer ++;
         if (_pointer == _times.size()) {
