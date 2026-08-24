@@ -170,15 +170,6 @@ void Generator::apply_dimensions()
   }
 }
 
-void Generator::add_cue() 
-{
-  if (_cue_points_count < kMaxSlicePointCount) {
-    auto p = _cue_points + _cue_points_count;
-    *p = _buffer->read_head();
-    _cue_points_count ++;
-  }
-  _is_auto_cue = false;
-}
 void Generator::auto_cue(const size_t slice_size, const size_t slice_count)
 {
   _slice_size = slice_size;
