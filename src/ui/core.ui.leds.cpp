@@ -500,25 +500,22 @@ void CoreUI::_show_pitch(const Deck::Ref ref)
 {
     if (!_is_changing(_speed[ref])) return;
     auto& ring = _ring[ref];
-
-    ring.set_hex_color(kWhite);
-    ring.set_segment(0.f, 0.998f);
-    ring.fill_brightness(0.2f);
-
+    float spread, value;
     if (_touched.test(Alt)) {
-        ring.set_brightness(.5f);
-        
         auto steps = kSpeedSteps.size() - 1;
-        auto norm_step = std::round(steps * _speed[ref].value()) / steps;
-        auto spread = 0.05f;
-        if (norm_step == 0.f) ring.set_segment(0.f, 2.f * spread, true);
-        else if (norm_step == 1.f) ring.set_segment(1.f - 2.f * spread, 1.f, true);
-        else ring.set_segment(norm_step - spread, norm_step + spread, true);
+        value = std::round(steps * _speed[ref].value()) / steps;
+        spread = 0.05f;
     }
     else {
-        ring.set_point_hex_color(kWhite);
-        ring.add_point(_speed[ref].value(), 1.0f, true);
+        value = _speed[ref].value();
+        spread = 0.01;
     }
+    ring.clear();
+    ring.set_hex_color(kWhite);
+    ring.set_brightness(.6f);
+    if (value - spread < 0) ring.set_segment(0.f, 2.f * spread, true);
+    else if (value + spread > 1.f) ring.set_segment(1.f - 2.f * spread, .998f, true);
+    else ring.set_segment(value - spread, value + spread, true);
     _show_value(_speed[ref], ring, kWhite, ValueDisplay::OnMoveDiffOnly);
 }
 void CoreUI::_show_filter(const Deck::Ref ref)
