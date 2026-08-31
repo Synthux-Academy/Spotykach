@@ -499,7 +499,7 @@ void CoreUI::_show_value(MValue& val, LEDRing& ring, const uint32_t def_color, c
 void CoreUI::_show_pitch(const Deck::Ref ref)
 {
     if (!_is_changing(_speed[ref])) return;
-    auto& ring = _ring[ref];
+    
     float spread, value;
     if (_touched.test(Alt)) {
         auto steps = kSpeedSteps.size() - 1;
@@ -510,6 +510,8 @@ void CoreUI::_show_pitch(const Deck::Ref ref)
         value = _speed[ref].value();
         spread = 0.01;
     }
+
+    auto& ring = _ring[ref];
     ring.clear();
     ring.set_hex_color(kWhite);
     ring.set_brightness(.6f);
