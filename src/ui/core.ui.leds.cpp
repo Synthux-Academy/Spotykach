@@ -16,8 +16,10 @@ static constexpr uint32_t kReelColor     = 0xf7941d;
 static constexpr uint32_t kSliceColor    = 0x0064ff;
 static constexpr uint32_t kDriftColor    = 0xc850ff;
 static constexpr uint32_t kDelayColor    = 0xFF6565;
-static constexpr uint32_t kSoftFxColor   = 0xFFD524;
-static constexpr uint32_t kHarshFxColor  = 0xFF9A24;
+static constexpr uint32_t kDriveColor   = 0xFFD524;
+static constexpr uint32_t kReduceColor  = 0xFF9A24;
+static constexpr uint32_t kFilterLPColor  = 0x7F1EA6;
+static constexpr uint32_t kFilterHPColor  = 0x29C745;
 
 static constexpr std::array<uint32_t, kStorageTapeCount> kTapeColor = {
     // Lexicographically ordered colors, 
@@ -63,12 +65,17 @@ static uint32_t mode_color(const spotykach::Mode mode)
         default:                       return kReelColor;
     };
 }
-static uint32_t grit_color(const Fx::GritMode mode)
+static uint32_t grit_color(const Grit::Mode mode, const float intensity)
 {
       switch (mode) {
-        case Fx::GritMode::Reduce: return kHarshFxColor;
-        default: return kSoftFxColor;
+        case Grit::Mode::Filter: return intensity < .5f ? kFilterLPColor : kFilterHPColor;
+        case Grit::Mode::Reduce: return kReduceColor;
+        default:                 return kDriveColor;
     }
+}
+static uint32_t flux_color(const Flux::Mode mode)
+{
+    return kDelayColor;
 }
 
 void CoreUI::render_leds() 
@@ -212,8 +219,13 @@ void CoreUI::_draw_fx(const Deck::Ref ref)
     auto& fx = _core.deck(ref).fx();
     auto grit_id = ref == Deck::A ? Hardware::LED_GRIT_A : Hardware::LED_GRIT_B;
     auto flux_id = ref == Deck::A ? Hardware::LED_FLUX_A : Hardware::LED_FLUX_B;
-    _led[grit_id].on(grit_color(fx.grit_mode()), fx.is_grit_on() ? 1.f : 0.5f);
-    _led[flux_id].on(kDelayColor, fx.is_flux_on() ? 1.f : 0.5f);
+    auto color = grit_color(fx.grit().mode(), _grit_intens[ref].value());
+    _led[grit_id].on(color, fx.is_grit_on() ? 1.f : 0.5f);
+    
+    auto flux_mode = fx.flux().mode();
+    auto flux_bright = flux_mode == Flux::Mode::ClockedDelay ? _clock_led_on : 1.f;
+
+    _led[flux_id].on(flux_color(flux_mode), fx.is_flux_on() ? flux_bright : flux_bright * .5f);
 }
 void CoreUI::_draw_play(const Deck::Ref ref, const bool blink)
 {
@@ -341,15 +353,22 @@ void CoreUI::_draw_ring(const Deck::Ref ref)
         _show_start_offset_interval(ref, default_color);
     }
     else if (_touched.test(ref == Deck::A ? GritA : GritB)) {
-        auto fx_color = grit_color(deck.fx().grit_mode());
+        auto grit_mode = deck.fx().grit().mode();
+        auto fx_color = grit_color(grit_mode, _grit_intens[ref].value());
         _show_value(_grit_intens[ref], ring, fx_color, ValueDisplay::Always);
+        if (grit_mode == Grit::Mode::Filter) {
+            _show_filter(ref);
+            _show_value(_grit_intens[ref], ring, fx_color, ValueDisplay::OnMoveDiffOnly);
+            _show_value(_grit_char[ref], ring, fx_color, ValueDisplay::OnMove);
+        }
         _show_value(_grit_mix[ref], ring, fx_color);
     }
     else if (_touched.test(ref == Deck::A ? FluxA : FluxB)) {
-        _show_value(_flux_intens[ref], ring, kDelayColor, ValueDisplay::Always);
-        _show_value(_flux_mix[ref], ring, kDelayColor);
-        _show_value(_flux_fb[ref], ring, kDelayColor);
-    } 
+        auto flux_mode = deck.fx().flux().mode();
+        auto fx_color = flux_color(flux_mode);
+        _show_value(_flux_intens[ref], ring, fx_color, ValueDisplay::Always);
+        _show_value(_flux_mix[ref], ring, fx_color);
+    }
     else if (deck.is_empty() && !deck.is_armed()) { 
         ring.set_hex_color(default_color);
         ring.set_brightness(_led_breathe_brightness * .5f);
@@ -480,27 +499,48 @@ void CoreUI::_show_value(MValue& val, LEDRing& ring, const uint32_t def_color, c
 void CoreUI::_show_pitch(const Deck::Ref ref)
 {
     if (!_is_changing(_speed[ref])) return;
-    auto& ring = _ring[ref];
-
-    ring.set_hex_color(kWhite);
-    ring.set_segment(0.f, 0.998f);
-    ring.fill_brightness(0.2f);
-
+    
+    float spread, value;
     if (_touched.test(Alt)) {
-        ring.set_brightness(.5f);
-        
         auto steps = kSpeedSteps.size() - 1;
-        auto norm_step = std::round(steps * _speed[ref].value()) / steps;
-        auto spread = 0.05f;
-        if (norm_step == 0.f) ring.set_segment(0.f, 2.f * spread, true);
-        else if (norm_step == 1.f) ring.set_segment(1.f - 2.f * spread, 1.f, true);
-        else ring.set_segment(norm_step - spread, norm_step + spread, true);
+        value = std::round(steps * _speed[ref].value()) / steps;
+        spread = 0.05f;
     }
     else {
-        ring.set_point_hex_color(kWhite);
-        ring.add_point(_speed[ref].value(), 1.0f, true);
+        value = _speed[ref].value();
+        spread = 0.01;
     }
+
+    auto& ring = _ring[ref];
+    ring.clear();
+    ring.set_hex_color(kWhite);
+    ring.set_brightness(.6f);
+    if (value - spread < 0) ring.set_segment(0.f, 2.f * spread, true);
+    else if (value + spread > 1.f) ring.set_segment(1.f - 2.f * spread, .998f, true);
+    else ring.set_segment(value - spread, value + spread, true);
     _show_value(_speed[ref], ring, kWhite, ValueDisplay::OnMoveDiffOnly);
+}
+void CoreUI::_show_filter(const Deck::Ref ref)
+{
+    auto& ring = _ring[ref];
+    auto val = _core.deck(ref).fx().grit().intensity();
+    
+    ring.set_brightness(.25f);
+
+    ring.set_hex_color(kFilterLPColor);
+    ring.set_segment(0.f, .5f);
+    ring.set_hex_color(kFilterHPColor);
+    ring.set_segment(.5f, .998f);
+    
+    ring.set_brightness(.6f);
+    if (val < .5f) {
+        ring.set_hex_color(kFilterLPColor);
+        ring.set_segment(val, .5f);
+    }
+    else {
+        ring.set_hex_color(kFilterHPColor);
+        ring.set_segment(.5f, val);
+    }
 }
 void CoreUI::_show_slots(const Deck::Ref ref)
 {   

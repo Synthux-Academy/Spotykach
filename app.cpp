@@ -3,7 +3,7 @@
 #include <functional>
 
 #include "common.h"
-#include "settings.h"
+#include "memory/settings.h"
 #include "hw/hardware.h"
 #include "ui/core.ui.h"
 #include "core/core.h"

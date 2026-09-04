@@ -6,7 +6,7 @@
 #include <bitset>
 #include <array>
 
-#include "../common.h"
+#include "common.h"
 #include "color.h"
 #include "core.midi.h"
 #include "hw/hardware.h"
@@ -94,6 +94,7 @@ private:
 
     void _draw_ring(const Deck::Ref);
     void _show_pitch(const Deck::Ref);
+    void _show_filter(const Deck::Ref);
     void _show_slots(const Deck::Ref);
     void _show_key_intervals();
     void _show_size_quarters(const Deck::Ref, const uint32_t color);
@@ -166,11 +167,13 @@ private:
     std::array<Hold<1500/*ms*/>, Deck::Count> _hold_clear;
     Hold<100/*ms*/> _tap_hold;
 
-    std::array<MValue, Deck::Count> _flux_mix;
-    std::array<MValue, Deck::Count> _grit_mix;
     std::array<MValue, Deck::Count> _flux_intens;
-    std::array<MValue, Deck::Count> _grit_intens;
     std::array<MValue, Deck::Count>_flux_fb;
+    std::array<MValue, Deck::Count> _flux_mix;
+
+    std::array<MValue, Deck::Count> _grit_intens;
+    std::array<MValue, Deck::Count> _grit_char;
+    std::array<MValue, Deck::Count> _grit_mix;
     
     std::array<float, Deck::Count> _pitch_knob_val;
     std::array<MValue, Deck::Count> _speed;

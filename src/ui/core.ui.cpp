@@ -84,11 +84,12 @@ void CoreUI::_init_values()
         _hold_clear[ref].init();
 
         auto& fx = deck.fx();
-        _grit_mix[ref].set(fx.grit_mix());
-        _grit_intens[ref].set(fx.grit_intensity());
-        _flux_mix[ref].set(fx.flux_mix());
-        _flux_intens[ref].set(fx.flux_intensity());
-        _flux_fb[ref].set(fx.flux_fb());
+        _grit_mix[ref].set(fx.grit().mix());
+        _grit_intens[ref].set(fx.grit().intensity());
+        _grit_char[ref].set(fx.grit().character());
+        _flux_mix[ref].set(fx.flux().mix_norm());
+        _flux_intens[ref].set(fx.flux().time_norm());
+        _flux_fb[ref].set(fx.flux().fb_norm());
     }
 
     _pan_range.set(.6f);
@@ -145,11 +146,12 @@ void CoreUI::process()
         if (_mix[ref].apply()) deck.set_inout_mix(_mix[ref].value());
         if (_feedback[ref].apply()) deck.set_feedback(_feedback[ref].value());
 
-        if (_flux_fb[ref].apply()) deck.fx().set_flux_fb(_flux_fb[ref].value());
-        if (_flux_intens[ref].apply()) deck.fx().set_flux_intensity(_flux_intens[ref].value());
-        if (_grit_intens[ref].apply()) deck.fx().set_grit_intensity(_grit_intens[ref].value());
-        if (_flux_mix[ref].apply()) deck.fx().set_flux_mix(_flux_mix[ref].value());
-        if (_grit_mix[ref].apply()) deck.fx().set_grit_mix(_grit_mix[ref].value());
+        if (_flux_fb[ref].apply()) deck.fx().flux().set_fb_norm(_flux_fb[ref].value());
+        if (_flux_intens[ref].apply()) deck.fx().flux().set_time_norm(_flux_intens[ref].value());
+        if (_grit_intens[ref].apply()) deck.fx().grit().set_intensity(_grit_intens[ref].value());
+        if (_flux_mix[ref].apply()) deck.fx().flux().set_mix_norm(_flux_mix[ref].value());
+        if (_grit_mix[ref].apply()) deck.fx().grit().set_mix(_grit_mix[ref].value());
+        if (_grit_char[ref].apply()) deck.fx().grit().set_character(_grit_char[ref].value());
 
         if (_mod_speed[ref].apply()) _core.mod(ref).set_speed_norm(_mod_speed[ref].value(), _touched.test(Alt));
         if (_mod_amp[ref].apply()) _core.mod(ref).set_amp_norm(_mod_amp[ref].value());
@@ -330,6 +332,7 @@ void CoreUI::_process_ui_queue()
                         _pos_offset[Deck::A].process(val, !fx_a_touched && is_alt_touched, changing_id_a);
                     }
                     _flux_fb[Deck::A].process(val, _touched.test(FluxA), changing_id_a);
+                    _grit_char[Deck::A].process(val, _touched.test(GritA), changing_id_a);
                     break;
 
                 case Hardware::CTRL_ENV_A: 
@@ -409,6 +412,7 @@ void CoreUI::_process_ui_queue()
                         _pos_offset[Deck::B].process(val, !fx_b_touched && is_alt_touched, changing_id_b);
                     }
                     _flux_fb[Deck::B].process(val, _touched.test(FluxB), changing_id_b);
+                    _grit_char[Deck::B].process(val, _touched.test(GritB), changing_id_b);
                     break;
 
                 case Hardware::CTRL_ENV_B: 
@@ -527,18 +531,17 @@ void CoreUI::_process_switches()
     deck_b.voxs().set_size_mod_on(sr2.test(0) || !sr2.test(1));
 
     // Manual tempo tap switch
-    // Update no faster than 500Hz
+    // Update no faster than 250Hz
     static auto is_tap_tapped = false;
     static uint32_t last_tap_update = 0;
     uint32_t now = System::GetNow();
-    if(now - last_tap_update >= 2)
+    if(now - last_tap_update >= 4)
     {
         last_tap_update = now;
         is_tap_tapped = sr2.test(6);
     }
     if (is_tap_tapped) {
         if (_tap_was_tapped) return;
-        _tap_was_tapped = true;
         
         if (_touched.test(Alt)) {
             _core.driver().toggle_source();
@@ -546,14 +549,22 @@ void CoreUI::_process_switches()
             _value_display_timeout.start();
         } 
         else if (_touched.test(GritA)) {
-            deck_a.fx().switch_grit_mode();
-            _grit_intens[Deck::A].set(deck_a.fx().grit_intensity());
-            _grit_mix[Deck::A].set(deck_a.fx().grit_mix());
-        } 
+            deck_a.fx().grit().switch_mode();
+            _grit_intens[Deck::A].set(deck_a.fx().grit().intensity());
+            _grit_mix[Deck::A].set(deck_a.fx().grit().mix());
+            _grit_char[Deck::A].set(deck_a.fx().grit().character());
+        }
         else if (_touched.test(GritB)) {
-            deck_b.fx().switch_grit_mode();
-            _grit_intens[Deck::B].set(deck_b.fx().grit_intensity());
-            _grit_mix[Deck::B].set(deck_b.fx().grit_mix());
+            deck_b.fx().grit().switch_mode();
+            _grit_intens[Deck::B].set(deck_b.fx().grit().intensity());
+            _grit_mix[Deck::B].set(deck_b.fx().grit().mix());
+            _grit_char[Deck::B].set(deck_b.fx().grit().character());
+        }
+        else if (_touched.test(FluxA)) {
+            deck_a.fx().flux().switch_mode();
+        }
+        else if (_touched.test(FluxB)) {
+            deck_b.fx().flux().switch_mode();
         }
         else {
             auto& d = _core.driver();
@@ -568,9 +579,9 @@ void CoreUI::_process_switches()
     }
     else if (_tap_was_tapped) {
         _reset_changing_value_id();
-        _tap_was_tapped = false;
         _tap_hold.end();
     }
+    _tap_was_tapped = is_tap_tapped;
 }
 
 // Clock ..........................................
@@ -677,6 +688,7 @@ void CoreUI::_on_midi_cc(const Deck::Ref ref, const CC cc, const float val)
         case CC::GritOn:     _core.deck(ref).fx().set_grit_on(val > 0); break;
         case CC::GritIntens: _grit_intens[ref].set(val); break;
         case CC::GritMix:    _grit_mix[ref].set(val);    break;
+        case CC::GritChar:   _grit_char[ref].set(val);   break;
         case CC::FluxOn:     _core.deck(ref).fx().set_flux_on(val > 0); break;
         case CC::FluxIntes:  _flux_intens[ref].set(val); break;
         case CC::FluxFB:     _flux_fb[ref].set(val);     break;

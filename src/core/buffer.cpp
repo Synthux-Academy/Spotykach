@@ -3,7 +3,7 @@
 #include "hann.h"
 #include "expose.h"
 #include "daisysp.h"
-#include "../common.h"
+#include "common.h"
 
 using namespace spotykach;
 
