@@ -119,9 +119,8 @@ void Generator::apply_dimensions()
     case VM::Spread: abs_size = norm_size * std::min(buffer_size, kMaxSpread); break;
   }
   
-  
   using CSM = Config::CueSizeMode;
-  auto mode = CSM::ignore;//Config::dynamic().cue_size_mode(ref);
+  auto mode = Config::dynamic().cue_size_mode(ref);
   if (mode != CSM::ignore && _cue_points_count > 1) { /* pre-sliced */
     auto last_idx = size_t(_cue_points_count - 1);
     auto start_idx = static_cast<size_t>(std::round(norm_start * (last_idx - 1)));

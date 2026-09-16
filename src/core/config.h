@@ -20,7 +20,7 @@ public:
         std::array<uint8_t, 2> midi_channel = { 0, 1 }; // Actual 1 , 2
         std::bitset<2> midi_play_stop = 0;
         std::bitset<2> is_slice_mono = { 0 };
-        std::array<uint8_t, 2> cue_size_mode = { snap, snap };
+        std::array<uint8_t, 2> cue_size_mode = { ignore, ignore };
         bool is_preload_on = true;
     };
 
