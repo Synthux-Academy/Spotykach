@@ -2,7 +2,7 @@
 
 #include "biquad.h"
 #include "deline.h"
-#include "../common.h"
+#include "common.h"
 
 namespace infrasonic {
 

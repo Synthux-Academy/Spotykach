@@ -15,6 +15,7 @@
             ],
             "includePath": [
                 "${workspaceFolder}/src/**",
+                "${workspaceFolder}/src/core/**",
                 "${workspaceFolder}/lib",
                 "${workspaceFolder}/lib/libDaisy/src",
                 "${workspaceFolder}/lib/libDaisy/src/sys",
@@ -49,6 +50,7 @@
             ],
             "includePath": [
                 "${workspaceFolder}/src/**",
+                "${workspaceFolder}/src/core/**",
                 "${workspaceFolder}/lib",
                 "${workspaceFolder}/lib/libDaisy/src",
                 "${workspaceFolder}/lib/libDaisy/src/sys",

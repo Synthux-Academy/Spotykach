@@ -33,14 +33,14 @@ namespace spotykach
         void _set(const int8_t idx, const infrasonic::Color color, const float brightness, const bool overlay = false);
 
         static constexpr float kBrightnessMult = .8f;
-        static constexpr int8_t kCount = 32;
-        static constexpr int8_t kUpperBound = kCount - 1;
+        static constexpr int8_t kLEDCount = 32;
+        static constexpr int8_t kUpperBound = kLEDCount - 1;
 
-        std::array<infrasonic::Color, kCount> _colors;
-        std::array<float, kCount> _brights;
+        std::array<infrasonic::Color, kLEDCount> _colors;
+        std::array<float, kLEDCount> _brights;
 
-        std::array<infrasonic::Color, kCount> _colors_cache;
-        std::array<float, kCount> _brights_cache;
+        std::array<infrasonic::Color, kLEDCount> _colors_cache;
+        std::array<float, kLEDCount> _brights_cache;
 
         infrasonic::Color _segment_color;
         infrasonic::Color _point_color;

@@ -64,7 +64,6 @@ public:
   void apply_speed() { set_speed(_norm_pitch_speed); }
 
   bool has_cue() const { return _cue_points_count || _snap_to_cue; }
-  void add_cue();
   void auto_cue(const size_t slice_size, const size_t slice_count);
   void clear_cue();
   void set_snap_to_cue(const bool value) { _snap_to_cue = value; }

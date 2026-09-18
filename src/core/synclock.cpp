@@ -1,7 +1,7 @@
 #include "synclock.h"
 #include <stdint.h>
 
-using namespace spotykach;
+using namespace bleeptools;
 
 SynClock::SynClock():
 _on_tick             { nullptr },
@@ -21,19 +21,20 @@ _is_about_to_run     { false },
 _last_state          { false }
 {};
 
-void SynClock::Init(const uint32_t update_interval_mks, const uint32_t ppqn_out) {
+void SynClock::init(const uint32_t update_interval_mks, const uint32_t ppqn_out) {
     _tr_time = ppqn_out * update_interval_mks;
     _ppqn_out = ppqn_out;
 };
 
-void SynClock::SetPPQNIn(const uint32_t value)
+void SynClock::set_ppqn_in(const uint32_t value)
 {
     _ticks_per_clock = _ppqn_out / value; 
     _ppqn_in = value;
 } 
 
-void SynClock::SetTempo(const float tempo) {
-    if (fcomp(tempo, _manual_tempo)) return;
+void SynClock::set_tempo(const float tempo) {
+    // Check for change larger than 2nd decimal digit
+    if (fabsf(tempo - _manual_tempo) < .01f) return;
     //Below 0.05 -> external clock: (val - 0.05) / (1 - 0.05)
     //TODO can fold and optimize a bit
     _manual_tempo = tempo;
@@ -47,7 +48,7 @@ void SynClock::SetTempo(const float tempo) {
             _is_running = true; 
             _is_about_to_run = false;
         }
-        Reset();
+        reset();
     }
 };
 
@@ -81,7 +82,7 @@ _tr_time - internal resolution (_ppqn_out) multiplied by interrupt interval.
 void SynClock::_emit_ticks(const bool on_external_tick, const bool kick_off) {
     if (_ticks >= kOverflowThresh 
     || _fticks >= kOverflowThresh 
-    || _tempo_ticks >= kOverflowThresh) Reset();
+    || _tempo_ticks >= kOverflowThresh) reset();
 
     int32_t nticks = 0;
 
@@ -132,7 +133,7 @@ void SynClock::_emit_ticks(const bool on_external_tick, const bool kick_off) {
     }
 };
 
-void SynClock::Reset() {
+void SynClock::reset() {
     _fticks = 0;
     _ticks = 0;
     _ticks_at_last_clock = 0;

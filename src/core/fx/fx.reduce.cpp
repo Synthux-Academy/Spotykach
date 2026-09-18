@@ -1,5 +1,5 @@
 #include "fx.reduce.h"
-#include "../common.h"
+#include "common.h"
 
 using namespace spotykach;
 using namespace infrasonic;

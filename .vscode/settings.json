@@ -110,5 +110,5 @@
     ],
     "editor.tabSize": 4,
     "cortex-debug.variableUseNaturalFormat": true,
-    "C_Cpp.default.compilerPath": "/usr/local/bin/arm-none-eabi-g++",
+    "C_Cpp.default.compilerPath": "/opt/homebrew/bin/arm-none-eabi-g++",
 }

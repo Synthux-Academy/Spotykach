@@ -4,13 +4,26 @@
 using namespace spotykach;
 using namespace infrasonic;
 
-inline void extrapolate(const float p, const float b, int32_t& p1, int32_t& p2, float& b1, float& b2)
+inline float smoothstep_frac(const float frac)
+{
+    return frac * frac * (3.f - 2.f * frac);
+}
+inline void extrapolate(
+    const float p, 
+    const float b,
+    int32_t& p1, 
+    int32_t& p2, 
+    float& b1, 
+    float& b2, 
+    const bool reverse = false)
 {
     p1 = static_cast<int32_t>(p);
-    p2 = p1 + 1;
-    auto frac = p - p1;
+    if (reverse) p2 = std::max(p1 - 1, 0l);
+    else p2 = p1 + 1;    
+    auto frac = smoothstep_frac(p - p1);
     b1 = (1.f - frac) * b;
     b2 = frac * b;
+    if (reverse) std::swap(b1, b2);
 }
 
 LEDRing::LEDRing():
@@ -45,36 +58,30 @@ void LEDRing::set_segment(float norm_start, float norm_end, const bool sharp)
     float sb1, sb2;
     while (norm_start < 0) { norm_start += 1.f; }
     if (sharp) {
-        sp1 = sp2 = std::round(norm_start * kCount);
+        sp1 = sp2 = std::round(norm_start * kLEDCount);
         sb1 = sb2 = _segment_brightness;
     }
     else {
-        extrapolate(norm_start * kUpperBound, _segment_brightness, sp1, sp2, sb1, sb2);
+        extrapolate(norm_start * kUpperBound, _segment_brightness, sp1, sp2, sb1, sb2, true);
     }
-    sp1 %= kCount;
-    sp2 %= kCount;
 
     int32_t ep1, ep2;
     float eb1, eb2;
     while (norm_end < 0) { norm_end += 1.f; }
     if (sharp) {
-        ep1 = ep2 = std::round(norm_end * kCount);
+        ep1 = ep2 = std::round(norm_end * kLEDCount);
         eb1 = eb2 = _segment_brightness;
     }
     else {
         extrapolate(norm_end * kUpperBound, _segment_brightness, ep1, ep2, eb1, eb2);
     }
-    ep1 %= kCount;
-    ep2 %= kCount;
 
     if (sp1 == ep1) {
         _set(sp1, _segment_color, sb1);
     }
     else {
-        if (sb1 > sb2) sb2 = _segment_brightness;
         _set(sp1, _segment_color, sb1);
         _set(sp2, _segment_color, sb2);
-
 
         auto s = sp2;
         auto e = ep1;
@@ -83,7 +90,7 @@ void LEDRing::set_segment(float norm_start, float norm_end, const bool sharp)
 
         for (int8_t idx = 0; idx < l; idx ++) {
             auto p = idx + s + 1;
-            if (p >= kCount) p -= kCount;
+            if (p >= kLEDCount) p -= kLEDCount;
             _set(p, _segment_color, _segment_brightness);
         }
 
@@ -100,7 +107,7 @@ void LEDRing::add_point(float norm_position, const float brightness, const bool 
         norm_position += 1.f;
     }
     if (sharp) {
-        _set(std::round(norm_position * kCount), _point_color, brightness, over);
+        _set(std::round(norm_position * kLEDCount), _point_color, brightness, over);
     } 
     else {
         extrapolate(norm_position * kUpperBound, brightness, p1, p2, b1, b2);
@@ -116,8 +123,8 @@ void LEDRing::set_point(uint8_t idx, const float brightness)
 
 void LEDRing::_set(int8_t idx, const infrasonic::Color color, const float brightness, const bool overlay)
 {
-    while (idx < 0) idx += kCount;
-    while (idx >= kCount) idx -= kCount;
+    while (idx < 0) idx += kLEDCount;
+    while (idx >= kLEDCount) idx -= kLEDCount;
     if (overlay) {
         _colors[idx] += color * (0.85 * brightness + 0.15);
     }

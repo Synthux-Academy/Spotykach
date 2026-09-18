@@ -70,7 +70,7 @@ public:
 
     void toggle_play(const Deck::Ref deck);
     
-    float tempo() { return _clock.Tempo(); }
+    float tempo() { return _clock.tempo(); }
     void set_tempo_norm(const float value) { _tempo.set_norm(value); }
     void tap_tempo() { _tempo.tap(); }
 
@@ -102,15 +102,14 @@ private:
     
     Deck&       _deck_a;
     Deck&       _deck_b;
-    SynClock    _clock;
     Divider     _divider;
     Tempo       _tempo;
     Click&      _click;
     Panner&     _panner;
-
     Modulator*  _mod;
     
-    daisy::StopwatchTimer _reset_timer;
+    bleeptools::SynClock    _clock;
+    daisy::StopwatchTimer   _reset_timer;
 
     std::function<void(const bool /*is key quarter*/)> _on_quarter;
     std::function<void()> _on_clock_out;
