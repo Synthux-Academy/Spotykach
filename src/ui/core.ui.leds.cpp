@@ -368,6 +368,7 @@ void CoreUI::_draw_ring(const Deck::Ref ref)
         auto fx_color = flux_color(flux_mode);
         _show_value(_flux_intens[ref], ring, fx_color, ValueDisplay::Always);
         _show_value(_flux_mix[ref], ring, fx_color);
+        _show_value(_flux_fb[ref], ring, kDelayColor);
     }
     else if (deck.is_empty() && !deck.is_armed()) { 
         ring.set_hex_color(default_color);
