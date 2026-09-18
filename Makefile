@@ -25,6 +25,10 @@ C_INCLUDES = -Isrc/ -Ilib/
 C_USR_FLAGS = -ffast-math -funroll-loops
 C_DEFS += -DINFS_LOG_TARGET=daisy::LOGGER_EXTERNAL
 
+# Bare-metal firmware has no OS loader enforcing W^X on ELF program
+# headers, so the RWX LOAD segment warning (binutils >= 2.39) is cosmetic.
+LDFLAGS += -Wl,--no-warn-rwx-segments
+
 CPP_SOURCES = \
 	main.cpp \
 	app.cpp \
