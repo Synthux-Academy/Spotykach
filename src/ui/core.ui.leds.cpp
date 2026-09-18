@@ -20,7 +20,6 @@ static constexpr uint32_t kDriveColor   = 0xFFD524;
 static constexpr uint32_t kReduceColor  = 0xFF9A24;
 static constexpr uint32_t kFilterLPColor  = 0x7F1EA6;
 static constexpr uint32_t kFilterHPColor  = 0x29C745;
-
 static constexpr std::array<uint32_t, kStorageTapeCount> kTapeColor = {
     // Lexicographically ordered colors, 
     // so the folders on the card going 
@@ -33,30 +32,7 @@ static constexpr std::array<uint32_t, kStorageTapeCount> kTapeColor = {
     kTurq,    //T urquoise
     0xffDE21  //Y ellow
 };
-static uint32_t clock_source_color(Driver& d) 
-{
-    switch (d.source()) {
-        case Driver::Source::internal: return kGreen;
-        case Driver::Source::ts4: return kPink;
-        case Driver::Source::midi: return kTurq;
-        default: return kWhite;
-    }
-}
-static uint32_t clock_color(Driver& d, const bool is_key)
-{
-    uint32_t src_color = clock_source_color(d);
-    if (is_key) { 
-        if (d.is_key_at_quarter()) return d.is_external_sync() ? src_color : kWhite; 
-        return d.is_key_sub_quarter() ? src_color : kWhite;
-    }
-    else { 
-        return src_color; 
-    }
-}
-static uint32_t count_in_color(const bool is_key)
-{
-    return is_key ? kWhite : kGreen;
-}
+
 static uint32_t mode_color(const spotykach::Mode mode)
 {
     switch (mode) {
@@ -111,11 +87,9 @@ void CoreUI::_draw_leds()
     _led[Hardware::LED_FLUX_A].set(_hw);
     _hw.leds.Set(Hardware::LED_FADER_A, kWhite, 1.f - _core.mix());
 
-    auto clck_src_color = clock_source_color(_core.driver());
-
     auto cycle_a_color = kWhite;
     if (_core.mod(Deck::A).type() == Modulator::Type::Follow) cycle_a_color = mode_color_a;
-    else if (_core.mod(Deck::A).is_synced()) cycle_a_color = clck_src_color;
+    else if (_core.mod(Deck::A).is_synced()) cycle_a_color = _clock_src_color;
     _hw.leds.Set(Hardware::LED_CYCLE_A, cycle_a_color, _lfo_a);
 
     auto mode_color_b = mode_color(deck_b.mode());
@@ -125,7 +99,7 @@ void CoreUI::_draw_leds()
 
     auto cycle_b_color = kWhite;
     if (_core.mod(Deck::B).type() == Modulator::Type::Follow) cycle_b_color = mode_color_b;
-    else if (_core.mod(Deck::B).is_synced()) cycle_b_color = clck_src_color;
+    else if (_core.mod(Deck::B).is_synced()) cycle_b_color = _clock_src_color;
     _hw.leds.Set(Hardware::LED_CYCLE_B, cycle_b_color, _lfo_b);
 
     switch (_core.route()) {
@@ -135,8 +109,7 @@ void CoreUI::_draw_leds()
     }
 
     if (_clock_led_on || _clock_source_changed) {
-        auto color = _clock_source_changed ? clck_src_color : clock_color(_core.driver(), _show_key_quarter);
-        _hw.leds.Set(Hardware::LED_CLOCK_IN, color, 1.f);
+        _hw.leds.Set(Hardware::LED_CLOCK_IN, _clock_source_changed ? _clock_src_color : _clock_color, 1.f);
     }
 
     auto gate_in_a_bright = .25f;
@@ -216,16 +189,21 @@ void CoreUI::_draw_launching()
 // Called from main /////////////////////
 void CoreUI::_draw_fx(const Deck::Ref ref)
 {
-    auto& fx = _core.deck(ref).fx();
-    auto grit_id = ref == Deck::A ? Hardware::LED_GRIT_A : Hardware::LED_GRIT_B;
-    auto flux_id = ref == Deck::A ? Hardware::LED_FLUX_A : Hardware::LED_FLUX_B;
-    auto color = grit_color(fx.grit().mode(), _grit_intens[ref].value());
-    _led[grit_id].on(color, fx.is_grit_on() ? 1.f : 0.5f);
-    
-    auto flux_mode = fx.flux().mode();
-    auto flux_bright = flux_mode == Flux::Mode::ClockedDelay ? _clock_led_on : 1.f;
+    static const auto off_bright    = .5f;
+    static const auto on_bright     = 1.f;
 
-    _led[flux_id].on(flux_color(flux_mode), fx.is_flux_on() ? flux_bright : flux_bright * .5f);
+    auto& fx = _core.deck(ref).fx();
+
+    /* Grit ---------------------------- */
+    auto color = grit_color(fx.grit().mode(), _grit_intens[ref].value());
+    auto grit_id = ref == Deck::A ? Hardware::LED_GRIT_A : Hardware::LED_GRIT_B;
+    _led[grit_id].on(color, fx.is_grit_on() ? on_bright : off_bright);
+
+    /* Flux ---------------------------- */
+    auto flux_mode = fx.flux().mode();
+    color = flux_mode == Flux::Mode::ClockedDelay && _clock_led_on ? _clock_color : flux_color(flux_mode);
+    auto flux_id = ref == Deck::A ? Hardware::LED_FLUX_A : Hardware::LED_FLUX_B;
+    _led[flux_id].on(color, fx.is_flux_on() ? on_bright : off_bright);
 }
 void CoreUI::_draw_play(const Deck::Ref ref, const bool blink)
 {
@@ -292,7 +270,7 @@ void  CoreUI::_draw_alt(const Deck::Ref ref)
     if (is_armed || is_recording) {
         uint32_t color = 0;
         if (is_armed && !is_recording && _clock_led_on) {
-            color = count_in_color(_show_key_quarter);
+            color = _clock_color;
         }
         else if (is_armed && is_recording) {
             color = kRed;
@@ -578,8 +556,8 @@ void CoreUI::_show_key_intervals()
     }
     uint32_t color;
     for (uint8_t i = 0; i < steps; i++) {
-        if (i == 0) color = _core.driver().is_key_sub_quarter() ? clock_source_color(_core.driver()) : kWhite;
-        else color = clock_source_color(_core.driver());
+        if (i == 0) color = _core.driver().is_key_sub_quarter() ? _clock_src_color : kWhite;
+        else color = _clock_src_color;
         _ring[Deck::A].set_point_hex_color(color);
         _ring[Deck::A].set_point(i * step + 4, i % 4 && interval != KI::k1_16 ? .25f : .7f);
     }
@@ -626,4 +604,30 @@ void CoreUI::_show_empty(const Deck::Ref ref)
 void CoreUI::_show_gate_in(const Deck::Ref ref)
 {
     _gate_in_led_cnt[ref] = 10;
+}
+
+static uint32_t clock_source_color(Driver& d) 
+{
+    switch (d.source()) {
+        case Driver::Source::internal: return kGreen;
+        case Driver::Source::ts4: return kPink;
+        case Driver::Source::midi: return kTurq;
+        default: return kWhite;
+    }
+}
+static uint32_t clock_color(Driver& d, const bool is_key, const uint32_t src_color)
+{
+    if (is_key) { 
+        if (d.is_key_at_quarter()) return d.is_external_sync() ? src_color : kWhite; 
+        return d.is_key_sub_quarter() ? src_color : kWhite;
+    }
+    else { 
+        return src_color; 
+    }
+}
+void CoreUI::_make_clock_color()
+{
+    auto& d = _core.driver();
+    _clock_src_color = clock_source_color(d);
+    _clock_color = clock_color(d, _show_key_quarter, _clock_src_color);
 }

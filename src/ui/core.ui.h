@@ -106,6 +106,10 @@ private:
 
     void _breathe_led();
 
+    uint32_t _clock_color;
+    uint32_t _clock_src_color;
+    void _make_clock_color();
+
     struct LED {
         public: 
         void init(int id)

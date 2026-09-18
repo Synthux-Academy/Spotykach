@@ -122,6 +122,7 @@ void CoreUI::process()
 
     auto blink = _arm_blink_timer.HasPassedMs(250);
     if (blink) _arm_blink_timer.Restart();
+    _make_clock_color();
 
     for (auto ref: { Deck::A, Deck::B }) {
         auto& deck = _core.deck(ref);
