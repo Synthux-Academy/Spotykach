@@ -367,7 +367,7 @@ void CoreUI::_draw_ring(const Deck::Ref ref)
         auto segment_start = deck.voxs().norm_start();
         auto segment_size = 0.f;
         if (deck.mode() == Mode::Drift) {
-            segment_size = deck.voxs().norm_spread() * .95f;
+            segment_size = std::clamp(deck.voxs().norm_spread(), 0.f, .92f);
             segment_start -= segment_size * .5f;
         }
         else {
