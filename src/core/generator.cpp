@@ -34,6 +34,7 @@ void Generator::init(Buffer* buffer, size_t* cue_points)
   _cue_points = cue_points;
   uint8_t cnt = 0;
   for (auto& v: _voxs) {
+    v.ref = ref;
     v.init(buffer, cnt);
     cnt ++;
   }

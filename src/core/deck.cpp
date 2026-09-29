@@ -34,6 +34,7 @@ void Deck::init(const Params p)
 
     _mix_smooth.init(p.sample_rate);
 
+    _buffer.ref = ref;
     _buffer.init(p.main_buf, p.main_buf_size);
     _detector.init(p.detect_buf);
 

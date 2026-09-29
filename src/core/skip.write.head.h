@@ -2,13 +2,14 @@
 
 #include <algorithm>
 #include "config.h"
+#include "phasor.h"
 
 
 namespace spotykach {
 
 struct SkipRequest {
-    float* rh;      //readhead
-    float* ph;      //playhead
+    Phasor* rh;     //readhead
+    Phasor* ph;     //playhead
     size_t* ws;     //win size
     int32_t ls;     //loop start
     int32_t ll;     //loop length
@@ -23,7 +24,7 @@ struct SkipRequest {
 inline static void skip_write_head_fwd(SkipRequest r)
 {
     /* wrapped read head */
-    auto rh = static_cast<int32_t>(*r.rh) % r.rs;
+    auto rh = r.rh->integral() % r.rs;
 
     /* integer write head */
     auto wh = static_cast<int32_t>(r.wh);
@@ -40,8 +41,8 @@ inline static void skip_write_head_fwd(SkipRequest r)
             auto ph = wh - r.ls + 1;
             /* prevent escaping from the segment */
             if (ph < r.ll) {
-                *r.ph = ph;
-                *r.rh = wh + 1;
+                *r.ph = Phasor(ph);
+                *r.rh = Phasor(wh + 1);
             }
         }
     }
@@ -54,8 +55,8 @@ inline static void skip_write_head_fwd(SkipRequest r)
         }
         else {
             wh = r.ls > r.wh ? r.wh + r.rs : r.wh;
-            *r.rh = wh - 1;
-            *r.ph = *r.rh - r.ls;
+            *r.rh = Phasor(wh - 1);
+            *r.ph = *r.rh - Phasor(r.ls);
         }
     }
 }
@@ -63,7 +64,7 @@ inline static void skip_write_head_fwd(SkipRequest r)
 inline static void skip_write_head_rev(SkipRequest r)
 {
     /* wrapped read head */
-    auto rh = static_cast<int32_t>(*r.rh) % r.rs;
+    auto rh = r.rh->integral() % r.rs;
     while (rh < 0) rh += r.rs;
 
     /* write head */
@@ -76,15 +77,15 @@ inline static void skip_write_head_rev(SkipRequest r)
         *r.ws = std::min(ws, *r.ws);
     }
     else {
-        auto sh = (*r.rh > r.rs) ? r.rs : 0;
+        auto sh = (*r.rh > Phasor(r.rs)) ? r.rs : 0;
         
         rh = r.wh + sh - 1;
         auto ph = r.ls + r.rb - rh;
 
         /* prevent escaping from the segment */
         if (ph > 0) {
-            *r.rh = rh;
-            *r.ph = ph;
+            *r.rh = Phasor(rh);
+            *r.ph = Phasor(ph);
         }
     }
 }
