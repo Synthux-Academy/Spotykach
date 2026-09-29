@@ -29,20 +29,20 @@ void Driver::init(const float sample_rate, const float buffer_size)
 {
     _reset_timer.Init();
 
-    _clock.Init(2000, kPPQNIntern); //2000 mks => 500Hz (see app.cpp)
-    _clock.SetPPQNIn(Source::ts4);
+    _clock.init(2000, kPPQNIntern); //2000 mks => 500Hz (see app.cpp)
+    _clock.set_ppqn_in(Source::ts4);
 
     using namespace std::placeholders;
 
     auto on_clock = std::bind(&Driver::_on_clock_tick, this, _1);
-    _clock.SetTempo(_tempo.bpm());
-    _clock.SetOnTick(on_clock);
-    _clock.Run();
+    _clock.set_tempo(_tempo.bpm());
+    _clock.set_on_tick(on_clock);
+    _clock.run();
 };
 
 void Driver::toggle_source() 
 {
-    _clock.Stop();
+    _clock.stop();
     _divider_reset_counts(true);
     static const auto src_cnt = 3;
     static Source src[src_cnt] = { Source::internal, Source::ts4, Source::midi };    
@@ -50,35 +50,35 @@ void Driver::toggle_source()
         if (src[i] == _source) {
             auto n = i + 1;
             _source = src[n < src_cnt ? n : 0];
-            _clock.SetPPQNIn(_source);
-            _clock.SetExternalClock(_source != Source::internal);
+            _clock.set_ppqn_in(_source);
+            _clock.set_external_clock(_source != Source::internal);
             break;
         }
     }
-    _clock.Run();
+    _clock.run();
     _reset_timer.Restart();
 }
 
 void Driver::tick(const bool external_tick) 
 {
     if (external_tick) {
-        if (!_clock.IsRunning()) {
-            _clock.Run();
+        if (!_clock.is_running()) {
+            _clock.run();
         }
         _reset_timer.Restart();
-        _clock.Tick(true);
+        _clock.tick(true);
     }
     else {
         // 1 second is chosen because the maximum expected interval between 
         // ticks at 4PPQN = 60000 / 20bpm / 4PPQN = 750ms. If more - we consider
         // there's no clock coming in.
-        if (_clock.ExternalClock() && _reset_timer.HasPassedMs(1000)) {
-            _clock.Stop();
+        if (_clock.external_clock() && _reset_timer.HasPassedMs(1000)) {
+            _clock.stop();
             _divider_reset_counts(true);
         }
         else {
-            _clock.Tick(false);
-            _clock.SetTempo(_tempo.bpm());
+            _clock.tick(false);
+            _clock.set_tempo(_tempo.bpm());
         }
     }
 };
@@ -115,10 +115,10 @@ void Driver::_on_clock_tick(const bool external_tick) {
         _panner.tick();
     }
 
-    _deck_a.set_tempo(_clock.Tempo());
-    _deck_b.set_tempo(_clock.Tempo());
+    _deck_a.set_tempo(_clock.tempo());
+    _deck_b.set_tempo(_clock.tempo());
 
-    _send_tick(tick, is_quarter, _clock.Tempo());
+    _send_tick(tick, is_quarter, _clock.tempo());
 };
 
 void Driver::set_key_tick_interval_norm(const float norm)
@@ -142,9 +142,9 @@ void Driver::_divider_reset_counts(const bool force)
         _divider.reset();
         _deck_a.reset_track_divider();
         _deck_b.reset_track_divider();
-        if (_clock.IsRunning()) {
-            _clock.Stop();
-            _clock.Run();
+        if (_clock.is_running()) {
+            _clock.stop();
+            _clock.run();
         }
     }
     else if (!_is_key) {
@@ -153,7 +153,7 @@ void Driver::_divider_reset_counts(const bool force)
         _quarter_tick_count = static_cast<int8_t>(_divider.resolution());
         _make_key();
         _indicate_quarter();
-        _send_tick(true, _clock.Tempo(), true);
+        _send_tick(true, _clock.tempo(), true);
     }
 }
 

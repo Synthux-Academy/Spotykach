@@ -1,5 +1,5 @@
 #include "fx.drive.h"
-#include "../common.h"
+#include "common.h"
 #include "expose.h"
 
 using namespace spotykach;

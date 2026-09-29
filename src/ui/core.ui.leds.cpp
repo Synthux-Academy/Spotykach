@@ -16,9 +16,10 @@ static constexpr uint32_t kReelColor     = 0xf7941d;
 static constexpr uint32_t kSliceColor    = 0x0064ff;
 static constexpr uint32_t kDriftColor    = 0xc850ff;
 static constexpr uint32_t kDelayColor    = 0xFF6565;
-static constexpr uint32_t kSoftFxColor   = 0xFFD524;
-static constexpr uint32_t kHarshFxColor  = 0xFF9A24;
-
+static constexpr uint32_t kDriveColor   = 0xFFD524;
+static constexpr uint32_t kReduceColor  = 0xFF9A24;
+static constexpr uint32_t kFilterLPColor  = 0x7F1EA6;
+static constexpr uint32_t kFilterHPColor  = 0x29C745;
 static constexpr std::array<uint32_t, kStorageTapeCount> kTapeColor = {
     // Lexicographically ordered colors, 
     // so the folders on the card going 
@@ -31,30 +32,7 @@ static constexpr std::array<uint32_t, kStorageTapeCount> kTapeColor = {
     kTurq,    //T urquoise
     0xffDE21  //Y ellow
 };
-static uint32_t clock_source_color(Driver& d) 
-{
-    switch (d.source()) {
-        case Driver::Source::internal: return kGreen;
-        case Driver::Source::ts4: return kPink;
-        case Driver::Source::midi: return kTurq;
-        default: return kWhite;
-    }
-}
-static uint32_t clock_color(Driver& d, const bool is_key)
-{
-    uint32_t src_color = clock_source_color(d);
-    if (is_key) { 
-        if (d.is_key_at_quarter()) return d.is_external_sync() ? src_color : kWhite; 
-        return d.is_key_sub_quarter() ? src_color : kWhite;
-    }
-    else { 
-        return src_color; 
-    }
-}
-static uint32_t count_in_color(const bool is_key)
-{
-    return is_key ? kWhite : kGreen;
-}
+
 static uint32_t mode_color(const spotykach::Mode mode)
 {
     switch (mode) {
@@ -63,12 +41,17 @@ static uint32_t mode_color(const spotykach::Mode mode)
         default:                       return kReelColor;
     };
 }
-static uint32_t grit_color(const Fx::GritMode mode)
+static uint32_t grit_color(const Grit::Mode mode, const float intensity)
 {
       switch (mode) {
-        case Fx::GritMode::Reduce: return kHarshFxColor;
-        default: return kSoftFxColor;
+        case Grit::Mode::Filter: return intensity < .5f ? kFilterLPColor : kFilterHPColor;
+        case Grit::Mode::Reduce: return kReduceColor;
+        default:                 return kDriveColor;
     }
+}
+static uint32_t flux_color(const Flux::Mode mode)
+{
+    return kDelayColor;
 }
 
 void CoreUI::render_leds() 
@@ -104,11 +87,9 @@ void CoreUI::_draw_leds()
     _led[Hardware::LED_FLUX_A].set(_hw);
     _hw.leds.Set(Hardware::LED_FADER_A, kWhite, 1.f - _core.mix());
 
-    auto clck_src_color = clock_source_color(_core.driver());
-
     auto cycle_a_color = kWhite;
     if (_core.mod(Deck::A).type() == Modulator::Type::Follow) cycle_a_color = mode_color_a;
-    else if (_core.mod(Deck::A).is_synced()) cycle_a_color = clck_src_color;
+    else if (_core.mod(Deck::A).is_synced()) cycle_a_color = _clock_src_color;
     _hw.leds.Set(Hardware::LED_CYCLE_A, cycle_a_color, _lfo_a);
 
     auto mode_color_b = mode_color(deck_b.mode());
@@ -118,7 +99,7 @@ void CoreUI::_draw_leds()
 
     auto cycle_b_color = kWhite;
     if (_core.mod(Deck::B).type() == Modulator::Type::Follow) cycle_b_color = mode_color_b;
-    else if (_core.mod(Deck::B).is_synced()) cycle_b_color = clck_src_color;
+    else if (_core.mod(Deck::B).is_synced()) cycle_b_color = _clock_src_color;
     _hw.leds.Set(Hardware::LED_CYCLE_B, cycle_b_color, _lfo_b);
 
     switch (_core.route()) {
@@ -128,8 +109,7 @@ void CoreUI::_draw_leds()
     }
 
     if (_clock_led_on || _clock_source_changed) {
-        auto color = _clock_source_changed ? clck_src_color : clock_color(_core.driver(), _show_key_quarter);
-        _hw.leds.Set(Hardware::LED_CLOCK_IN, color, 1.f);
+        _hw.leds.Set(Hardware::LED_CLOCK_IN, _clock_source_changed ? _clock_src_color : _clock_color, 1.f);
     }
 
     auto gate_in_a_bright = .25f;
@@ -209,11 +189,21 @@ void CoreUI::_draw_launching()
 // Called from main /////////////////////
 void CoreUI::_draw_fx(const Deck::Ref ref)
 {
+    static const auto off_bright    = .5f;
+    static const auto on_bright     = 1.f;
+
     auto& fx = _core.deck(ref).fx();
+
+    /* Grit ---------------------------- */
+    auto color = grit_color(fx.grit().mode(), _grit_intens[ref].value());
     auto grit_id = ref == Deck::A ? Hardware::LED_GRIT_A : Hardware::LED_GRIT_B;
+    _led[grit_id].on(color, fx.is_grit_on() ? on_bright : off_bright);
+
+    /* Flux ---------------------------- */
+    auto flux_mode = fx.flux().mode();
+    color = flux_mode == Flux::Mode::ClockedDelay && _clock_led_on ? _clock_color : flux_color(flux_mode);
     auto flux_id = ref == Deck::A ? Hardware::LED_FLUX_A : Hardware::LED_FLUX_B;
-    _led[grit_id].on(grit_color(fx.grit_mode()), fx.is_grit_on() ? 1.f : 0.5f);
-    _led[flux_id].on(kDelayColor, fx.is_flux_on() ? 1.f : 0.5f);
+    _led[flux_id].on(color, fx.is_flux_on() ? on_bright : off_bright);
 }
 void CoreUI::_draw_play(const Deck::Ref ref, const bool blink)
 {
@@ -280,7 +270,7 @@ void  CoreUI::_draw_alt(const Deck::Ref ref)
     if (is_armed || is_recording) {
         uint32_t color = 0;
         if (is_armed && !is_recording && _clock_led_on) {
-            color = count_in_color(_show_key_quarter);
+            color = _clock_color;
         }
         else if (is_armed && is_recording) {
             color = kRed;
@@ -341,15 +331,23 @@ void CoreUI::_draw_ring(const Deck::Ref ref)
         _show_start_offset_interval(ref, default_color);
     }
     else if (_touched.test(ref == Deck::A ? GritA : GritB)) {
-        auto fx_color = grit_color(deck.fx().grit_mode());
+        auto grit_mode = deck.fx().grit().mode();
+        auto fx_color = grit_color(grit_mode, _grit_intens[ref].value());
         _show_value(_grit_intens[ref], ring, fx_color, ValueDisplay::Always);
+        if (grit_mode == Grit::Mode::Filter) {
+            _show_filter(ref);
+            _show_value(_grit_intens[ref], ring, fx_color, ValueDisplay::OnMoveDiffOnly);
+            _show_value(_grit_char[ref], ring, fx_color, ValueDisplay::OnMove);
+        }
         _show_value(_grit_mix[ref], ring, fx_color);
     }
     else if (_touched.test(ref == Deck::A ? FluxA : FluxB)) {
-        _show_value(_flux_intens[ref], ring, kDelayColor, ValueDisplay::Always);
-        _show_value(_flux_mix[ref], ring, kDelayColor);
+        auto flux_mode = deck.fx().flux().mode();
+        auto fx_color = flux_color(flux_mode);
+        _show_value(_flux_intens[ref], ring, fx_color, ValueDisplay::Always);
+        _show_value(_flux_mix[ref], ring, fx_color);
         _show_value(_flux_fb[ref], ring, kDelayColor);
-    } 
+    }
     else if (deck.is_empty() && !deck.is_armed()) { 
         ring.set_hex_color(default_color);
         ring.set_brightness(_led_breathe_brightness * .5f);
@@ -480,27 +478,48 @@ void CoreUI::_show_value(MValue& val, LEDRing& ring, const uint32_t def_color, c
 void CoreUI::_show_pitch(const Deck::Ref ref)
 {
     if (!_is_changing(_speed[ref])) return;
-    auto& ring = _ring[ref];
-
-    ring.set_hex_color(kWhite);
-    ring.set_segment(0.f, 0.998f);
-    ring.fill_brightness(0.2f);
-
+    
+    float spread, value;
     if (_touched.test(Alt)) {
-        ring.set_brightness(.5f);
-        
         auto steps = kSpeedSteps.size() - 1;
-        auto norm_step = std::round(steps * _speed[ref].value()) / steps;
-        auto spread = 0.05f;
-        if (norm_step == 0.f) ring.set_segment(0.f, 2.f * spread, true);
-        else if (norm_step == 1.f) ring.set_segment(1.f - 2.f * spread, 1.f, true);
-        else ring.set_segment(norm_step - spread, norm_step + spread, true);
+        value = std::round(steps * _speed[ref].value()) / steps;
+        spread = 0.05f;
     }
     else {
-        ring.set_point_hex_color(kWhite);
-        ring.add_point(_speed[ref].value(), 1.0f, true);
+        value = _speed[ref].value();
+        spread = 0.01;
     }
+
+    auto& ring = _ring[ref];
+    ring.clear();
+    ring.set_hex_color(kWhite);
+    ring.set_brightness(.6f);
+    if (value - spread < 0) ring.set_segment(0.f, 2.f * spread, true);
+    else if (value + spread > 1.f) ring.set_segment(1.f - 2.f * spread, .998f, true);
+    else ring.set_segment(value - spread, value + spread, true);
     _show_value(_speed[ref], ring, kWhite, ValueDisplay::OnMoveDiffOnly);
+}
+void CoreUI::_show_filter(const Deck::Ref ref)
+{
+    auto& ring = _ring[ref];
+    auto val = _core.deck(ref).fx().grit().intensity();
+    
+    ring.set_brightness(.25f);
+
+    ring.set_hex_color(kFilterLPColor);
+    ring.set_segment(0.f, .5f);
+    ring.set_hex_color(kFilterHPColor);
+    ring.set_segment(.5f, .998f);
+    
+    ring.set_brightness(.6f);
+    if (val < .5f) {
+        ring.set_hex_color(kFilterLPColor);
+        ring.set_segment(val, .5f);
+    }
+    else {
+        ring.set_hex_color(kFilterHPColor);
+        ring.set_segment(.5f, val);
+    }
 }
 void CoreUI::_show_slots(const Deck::Ref ref)
 {   
@@ -537,8 +556,8 @@ void CoreUI::_show_key_intervals()
     }
     uint32_t color;
     for (uint8_t i = 0; i < steps; i++) {
-        if (i == 0) color = _core.driver().is_key_sub_quarter() ? clock_source_color(_core.driver()) : kWhite;
-        else color = clock_source_color(_core.driver());
+        if (i == 0) color = _core.driver().is_key_sub_quarter() ? _clock_src_color : kWhite;
+        else color = _clock_src_color;
         _ring[Deck::A].set_point_hex_color(color);
         _ring[Deck::A].set_point(i * step + 4, i % 4 && interval != KI::k1_16 ? .25f : .7f);
     }
@@ -585,4 +604,30 @@ void CoreUI::_show_empty(const Deck::Ref ref)
 void CoreUI::_show_gate_in(const Deck::Ref ref)
 {
     _gate_in_led_cnt[ref] = 10;
+}
+
+static uint32_t clock_source_color(Driver& d) 
+{
+    switch (d.source()) {
+        case Driver::Source::internal: return kGreen;
+        case Driver::Source::ts4: return kPink;
+        case Driver::Source::midi: return kTurq;
+        default: return kWhite;
+    }
+}
+static uint32_t clock_color(Driver& d, const bool is_key, const uint32_t src_color)
+{
+    if (is_key) { 
+        if (d.is_key_at_quarter()) return d.is_external_sync() ? src_color : kWhite; 
+        return d.is_key_sub_quarter() ? src_color : kWhite;
+    }
+    else { 
+        return src_color; 
+    }
+}
+void CoreUI::_make_clock_color()
+{
+    auto& d = _core.driver();
+    _clock_src_color = clock_source_color(d);
+    _clock_color = clock_color(d, _show_key_quarter, _clock_src_color);
 }

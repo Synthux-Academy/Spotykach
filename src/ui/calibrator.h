@@ -1,7 +1,7 @@
 #pragma once
 
 #include "hw/hardware.h"
-#include "settings.h"
+#include "memory/settings.h"
 #include "nocopy.h"
 
 namespace spotykach {

@@ -1,6 +1,6 @@
 #include "biquad.h"
 #include <cmath>
-#include "../common.h"
+#include "common.h"
 
 using namespace infrasonic;
 
