@@ -30,6 +30,12 @@ public:
         none = 0xff
     };
 
+    enum class Direction: uint8_t {
+        fwd,
+        rev,
+        none = 0xff
+    };
+
     Deck();
     ~Deck() {};
 

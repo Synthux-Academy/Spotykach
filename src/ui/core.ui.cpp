@@ -20,6 +20,7 @@ _midi               { CoreMIDI(hw, core) },
 _settings           { settings },
 _storage            { storage },
 _calibrator         { Calibrator(hw, settings) },
+_ply_cue            { Deck::Direction::none, Deck::Direction::none },
 _rec_cue            { Deck::Source::none, Deck::Source::none },
 _state              { State::launching },
 _show_key_quarter   { false },
@@ -51,7 +52,7 @@ void CoreUI::init()
     auto on_clock_out = std::bind(&CoreUI::_process_clock_out, this);
     _core.driver().set_on_clock_out(on_clock_out);
 
-    auto on_play = std::bind(&CoreUI::_toggle_play, this, _1, _2);
+    auto on_play = std::bind(&CoreUI::_on_midi_play, this, _1, _2);
     auto on_record = std::bind(&CoreUI::_on_midi_rec, this, _1, _2);
     auto on_note = std::bind(&CoreUI::_on_midi_note_on, this, _1, _2);
     auto on_cc = std::bind(&CoreUI::_on_midi_cc, this, _1, _2, _3);
@@ -163,6 +164,10 @@ void CoreUI::process()
             deck.clear_sequence();
         }
 
+        if (_ply_cue[ref] != Deck::Direction::none) {
+            _toggle_play(ref, _ply_cue[ref] == Deck::Direction::rev);
+            _ply_cue[ref] = Deck::Direction::none;
+        }
         if (_rec_cue[ref] != Deck::Source::none) {
             _toggle_record(ref, _rec_cue[ref]);
             _rec_cue[ref] = Deck::Source::none;
@@ -701,6 +706,10 @@ void CoreUI::_on_midi_cc(const Deck::Ref ref, const CC cc, const float val)
         case CC::FluxMix:    _flux_mix[ref].set(val);    break;
         default: break;
     }
+}
+void CoreUI::_on_midi_play(const Deck::Ref ref, const bool reverse)
+{
+    _ply_cue[ref] = reverse ? Deck::Direction::rev : Deck::Direction::fwd;
 }
 void CoreUI::_on_midi_rec(const Deck::Ref ref, const bool internal)
 {

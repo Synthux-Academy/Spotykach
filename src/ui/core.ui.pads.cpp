@@ -189,7 +189,7 @@ void CoreUI::_on_play_touch(const Deck::Ref ref, const bool reverse)
         _rec_cue[ref] = reverse ? Deck::Source::internal : Deck::Source::external;
     }
     else {
-        _toggle_play(ref, reverse);
+        _ply_cue[ref] = reverse ? Deck::Direction::rev : Deck::Direction::fwd;
     }
 }
 
