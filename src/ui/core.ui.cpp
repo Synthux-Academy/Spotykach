@@ -500,7 +500,7 @@ void CoreUI::_process_switches()
     }
 
     // Mode A switch
-    Mode ma = deck_a.mode();
+    Mode ma = deck_a.target_mode();
     Mode nma = ma;
     if(sr1.test(6))      nma = Mode::Drift;
     else if(sr1.test(7)) nma = Mode::Reel;
@@ -527,7 +527,7 @@ void CoreUI::_process_switches()
     }
 
     // Mode B switch
-    Mode mb = deck_b.mode();
+    Mode mb = deck_b.target_mode();
     Mode nmb = mb;
     if(sr2.test(2))      nmb = Mode::Drift;
     else if(sr2.test(3)) nmb = Mode::Reel;

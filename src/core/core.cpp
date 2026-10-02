@@ -82,8 +82,8 @@ void Core::infer_panner_mode()
         auto pan_mode = Panner::Mode::off;
         auto wide = false;
         if (_route == Route::GenerativeStereo) {
-            wide = deck.mode() == Mode::Drift;
-            pan_mode = _panner_mode(deck.mode());
+            wide = deck.target_mode() == Mode::Drift;
+            pan_mode = _panner_mode(deck.target_mode());
         }
         _panner.set_mode(pan_mode, ref);
         deck.voxs().set_is_wide(wide);
@@ -103,6 +103,9 @@ void Core::process(const float* const* in, float** out, size_t size)
     float out_b[2] = { 0, 0 };
     auto& deck_a = deck(Deck::A);
     auto& deck_b = deck(Deck::B);
+
+    deck_a.process_commands();
+    deck_b.process_commands();
 
     auto stereo = _route != Route::DoubleMono;
 
