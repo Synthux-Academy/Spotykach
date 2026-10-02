@@ -111,9 +111,11 @@ private:
         }
 
         // If the voice should be kept on,
-        // take the next one from the queue
+        // take the next one from the queue.
+        // Bounded to one pass over the queue so that a corrupted queue
+        // (all entries equal to the holding index) can't hang the caller.
         auto vox_idx = _queue[queue_idx];
-        while (vox_idx == _holding_index) {
+        for (uint8_t n = 0; vox_idx == _holding_index && n < max_vox_count; n++) {
             queue_idx ++;
             if (queue_idx == _queue.size()) {
                 queue_idx = 0;
@@ -151,7 +153,9 @@ private:
 
     void _release_event_at(const uint8_t idx) {
         _active[idx] = false;
-        _note_on_count --;
+        if (_note_on_count > 0) {
+            _note_on_count --;
+        }
         _on_event_off(idx);
     }
 
