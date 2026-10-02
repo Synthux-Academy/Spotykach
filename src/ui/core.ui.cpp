@@ -20,6 +20,7 @@ _midi               { CoreMIDI(hw, core) },
 _settings           { settings },
 _storage            { storage },
 _calibrator         { Calibrator(hw, settings) },
+_rec_cue            { Deck::Source::none, Deck::Source::none },
 _state              { State::launching },
 _show_key_quarter   { false },
 _clock_led_on       { false },
@@ -51,7 +52,7 @@ void CoreUI::init()
     _core.driver().set_on_clock_out(on_clock_out);
 
     auto on_play = std::bind(&CoreUI::_toggle_play, this, _1, _2);
-    auto on_record = std::bind(&CoreUI::_toggle_record, this, _1, _2);
+    auto on_record = std::bind(&CoreUI::_on_midi_rec, this, _1, _2);
     auto on_note = std::bind(&CoreUI::_on_midi_note_on, this, _1, _2);
     auto on_cc = std::bind(&CoreUI::_on_midi_cc, this, _1, _2, _3);
     _midi.set_on_play(on_play);
@@ -160,6 +161,11 @@ void CoreUI::process()
         if (_hold_clear[ref].process()) {
             _hold_clear[ref].end();
             deck.clear_sequence();
+        }
+
+        if (_rec_cue[ref] != Deck::Source::none) {
+            _toggle_record(ref, _rec_cue[ref]);
+            _rec_cue[ref] = Deck::Source::none;
         }
 
         // LEDs /////////
@@ -646,12 +652,11 @@ void CoreUI::_toggle_play(const Deck::Ref ref, const bool reverse)
     }
     deck.set_reverse(reverse);
 }
-void CoreUI::_toggle_record(const Deck::Ref ref, const bool internal)
-{
+void CoreUI::_toggle_record(const Deck::Ref ref, const Deck::Source src)
+{   
     if (!_storage.of(ref).is_idle()) return;
 
     auto& deck = _core.deck(ref);
-    auto src = internal ? Deck::Source::internal : Deck::Source::external;
     _core.set_source(src, ref);
     deck.toggle_recording();
     _storage.of(ref).reset_recent_slot();
@@ -696,4 +701,8 @@ void CoreUI::_on_midi_cc(const Deck::Ref ref, const CC cc, const float val)
         case CC::FluxMix:    _flux_mix[ref].set(val);    break;
         default: break;
     }
+}
+void CoreUI::_on_midi_rec(const Deck::Ref ref, const bool internal)
+{
+    _rec_cue[ref] = internal ? Deck::Source::internal : Deck::Source::external;
 }

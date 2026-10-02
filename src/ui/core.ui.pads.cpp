@@ -185,8 +185,12 @@ void CoreUI::_on_play_touch(const Deck::Ref ref, const bool reverse)
         return;
     }
     
-    if (_touched.test(Alt)) _toggle_record(ref, reverse);
-    else _toggle_play(ref, reverse);
+    if (_touched.test(Alt)) {
+        _rec_cue[ref] = reverse ? Deck::Source::internal : Deck::Source::external;
+    }
+    else {
+        _toggle_play(ref, reverse);
+    }
 }
 
 void CoreUI::_on_alt_touch() 

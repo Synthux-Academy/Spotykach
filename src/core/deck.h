@@ -26,7 +26,8 @@ public:
 
     enum class Source: uint8_t {
         external,
-        internal
+        internal,
+        none = 0xff
     };
 
     Deck();
