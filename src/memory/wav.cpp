@@ -19,7 +19,7 @@ bool check_id(const uint8_t* data, size_t offset, const char* id)
 void read_cue_points(uint8_t* in_bytes, size_t* out_cue_points, uint8_t* out_cue_count, const uint32_t cue_limit, uint32_t cursor)
 {
     uint32_t numPoints = read_val<uint32_t>(in_bytes, cursor);
-    auto count = std::min(numPoints, static_cast<uint32_t>(32));
+    auto count = std::min(numPoints, static_cast<uint32_t>(256));
     volatile auto added_points = 0;
     for (uint32_t i = 0; i < count; ++i) {
         // Each cue point is 24 bytes. Sample Offset is at offset 20 within the point.
