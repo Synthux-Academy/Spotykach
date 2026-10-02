@@ -135,15 +135,15 @@ void Vox::_check_window(Window& w)
 {
     if (!w.is_active()) return;
     float slice_playhead = 0;
-    float win_playhead = 0;
+    Phasor win_playhead;
     switch (_mode) {
     case Mode::Linear: {
-            win_playhead = 
-            slice_playhead = _speed_mode == SpeedMode::Tape ? w.play_head() : w.steady_playhead();
+            win_playhead = _speed_mode == SpeedMode::Tape ? w.play_head() : Phasor(w.steady_playhead());
+            slice_playhead = win_playhead.to_float();
         }
         break;
     case Mode::Spread: {
-            win_playhead = 0;
+            win_playhead = Phasor();
             slice_playhead = _iterator;
         }
         break;
@@ -160,7 +160,7 @@ void Vox::_check_window(Window& w)
 void Vox::_seed()
 {
     if (is_playing() && _win_count < _max_win_count && _interval_count >= _next_inetrval) {
-        _activate(0);
+        _activate(Phasor());
         _next_inetrval = static_cast<size_t>(_window_size * _rnd() * .1f + 96);
         _interval_count = 0;
     }
@@ -169,17 +169,17 @@ void Vox::_seed()
     }
 }
 
-void Vox::_activate(float playhead, const bool is_first) 
+void Vox::_activate(Phasor playhead, const bool is_first) 
 {
     for (auto& w: _wins) {
         if (!w.is_active()) {
             w.set_is_first(is_first);
 
             // Upon start the first window starts with zero...
-            if (_playhead_shift != 0 && playhead != 0) {
+            if (_playhead_shift != 0 && playhead != Phasor()) {
                 //... afterwards every window gets shifted by delta
-                if (_is_reverse) playhead -= _playhead_shift;
-                else playhead += _playhead_shift;
+                if (_is_reverse) playhead -= Phasor(_playhead_shift);
+                else playhead += Phasor(_playhead_shift);
             }
 
             Window::Params p;
@@ -212,7 +212,7 @@ void Vox::_activate(float playhead, const bool is_first)
 float Vox::playhead() const
 { 
     for (auto& w : _wins) {
-        if (w.is_active()) return w.readhead();
+        if (w.is_active()) return w.readhead().to_float();
     } 
     return 0.f;
 }
@@ -281,7 +281,7 @@ void Vox::_do_trigger()
 {
     _iterator = 0;
     _slope_counter = 0;
-    _activate(0, true);
+    _activate(Phasor(), true);
     _env.trigger();
     _state = State::attack;
 }

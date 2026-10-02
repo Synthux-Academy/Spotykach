@@ -8,6 +8,7 @@
 #include "config.h"
 #include "softswitch.h"
 #include "nocopy.h"
+#include "phasor.h"
 
 namespace spotykach {
 
@@ -21,9 +22,11 @@ public:
     Buffer();
     ~Buffer() {};
 
+    int ref;
+
     void init(Frame* buf, size_t length);
 
-    void read_linear(float frame, float& out0, float& out1);
+    void read_linear(const Phasor& frame, float& out0, float& out1);
     
     void set_recording(const bool is_rec_on);
     bool is_recording() const { return _state != State::idle; }
@@ -49,7 +52,6 @@ private:
     NOCOPY(Buffer)
 
     static constexpr auto kFadeCurveKof = 1.f / kRecordFade;
-    void _read(size_t frame, float& out0, float& out1);
 
     enum class State: uint8_t {
         idle,

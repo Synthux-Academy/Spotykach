@@ -15,47 +15,48 @@ public:
     {
         using namespace infrasonic;
 
-        if (p1 != 0) {
+        if (p1 > kOff) {
             Log::PrintLine("P1 %d", p1);
-            p1 = 0;
+            p1 = kOff;
         }
 
-        if (p2 != 0) {
+        if (p2 > kOff) {
             Log::PrintLine("P2 %d", p2);
-            p2 = 0;
+            p2 = kOff;
         }
 
-        if (p3 > -2) {
+        if (p3 > kOff) {
             Log::Print("P3 ");
-            Log::PrintLine(FLT_FMT(5), FLT_VAR(5, p3));
-            p3 = -2;
+            Log::PrintLine(FLT_FMT(7), FLT_VAR(7, p3));
+            p3 = kOff;
         }
 
-        if (p4 > -2) {
+        if (p4 > kOff) {
             Log::Print("P4 ");
-            Log::PrintLine(FLT_FMT(5), FLT_VAR(5, p4));
-            p4 = -2;
+            Log::PrintLine(FLT_FMT(7), FLT_VAR(7, p4));
+            p4 = kOff;
         }
 
-        if (p5 > -2) {
+        if (p5 > kOff) {
             Log::Print("P5 ");
-            Log::PrintLine(FLT_FMT(5), FLT_VAR(5, p5));
-            p5 = -2;
+            Log::PrintLine(FLT_FMT(7), FLT_VAR(7, p5));
+            p5 = kOff;
         }
     }
 
     std::array<uint8_t, 8> vox;
     std::array<uint8_t, 4> layer;
 
-    int p1 = 0;
-    int p2 = 0;
-    float p3 = -2;
-    float p4 = -2;
-    float p5 = -2;
+    int32_t p1 = kOff;
+    int32_t p2 = kOff;
+    float p3 = kOff;
+    float p4 = kOff;
+    float p5 = kOff;
 
 private:
 Expose() = default;
 NOCOPY(Expose)
+static constexpr auto kOff = -INT32_MAX;
 
 };
 

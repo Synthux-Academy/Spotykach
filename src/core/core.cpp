@@ -82,8 +82,8 @@ void Core::infer_panner_mode()
         auto pan_mode = Panner::Mode::off;
         auto wide = false;
         if (_route == Route::GenerativeStereo) {
-            wide = deck.mode() == Mode::Drift;
-            pan_mode = _panner_mode(deck.mode());
+            wide = deck.target_mode() == Mode::Drift;
+            pan_mode = _panner_mode(deck.target_mode());
         }
         _panner.set_mode(pan_mode, ref);
         deck.voxs().set_is_wide(wide);
@@ -104,6 +104,9 @@ void Core::process(const float* const* in, float** out, size_t size)
     auto& deck_a = deck(Deck::A);
     auto& deck_b = deck(Deck::B);
 
+    deck_a.process_commands();
+    deck_b.process_commands();
+
     auto stereo = _route != Route::DoubleMono;
 
     for (size_t i = 0; i < size; i++) {
@@ -122,11 +125,13 @@ void Core::process(const float* const* in, float** out, size_t size)
         switch (_source[Deck::A]) {
             case Deck::Source::internal: deck_a.process_in(out_b[0], out_b[1]); break;
             case Deck::Source::external: deck_a.process_in(in_a[0], in_a[1]); break;
+            default: break;
         }
         
         switch (_source[Deck::B]) {
             case Deck::Source::internal: deck_b.process_in(out_a[0], out_a[1]); break;
             case Deck::Source::external: deck_b.process_in(in_b[0], in_b[1]); break;
+            default: break;
         }
 
         _mod[Deck::A].follow(out_a[0]);

@@ -74,7 +74,7 @@ static constexpr float kLFOFreqRange = 11.99f;
 static constexpr float kDefaultFeedback = 0.95f; //-3db at -60...0dB scale
 
 // Cue points ...................................
-static constexpr uint8_t kMaxSlicePointCount = 32;
+static constexpr uint16_t kMaxSlicePointCount = 256;
 
 // MIDI ..........................................
 enum CC: uint8_t {

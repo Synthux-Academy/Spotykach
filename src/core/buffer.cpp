@@ -86,37 +86,31 @@ void Buffer::clear()
     _state = State::idle;
 };
 
-void Buffer::read_linear(float frame, float& out0, float& out1) 
+void Buffer::read_linear(const Phasor& frame, float& out0, float& out1) 
 {
-    // Wrap negative
-    while (frame < 0) frame += _size;
+    if (_size == 0) {
+        out0 = out1 = 0.f;
+        return;
+    }
 
-    // Take integer part of the frame
-    auto int_fr = static_cast<size_t>(frame);
+    // Wrap integer part into [0, size)
+    const auto size = static_cast<int32_t>(_size);
+    auto int_fr = frame.integral() % size;
+    if (int_fr < 0) int_fr += size;
 
-    // Take fractional part
-    auto frac_fr = frame - int_fr;
     auto next_fr = int_fr + 1;
-    
-    auto a0 = 0.f;
-    auto a1 = 0.f;
-    _read(int_fr, a0, a1);
+    if (next_fr == size) next_fr = 0;
 
-    auto n0 = 0.f;
-    auto n1 = 0.f;
-    _read(next_fr, n0, n1);
+    // Fractional part has constant precision regardless of the frame position
+    auto frac_fr = frame.fraction();
 
-    out0 = a0 + frac_fr * (n0 - a0);
-    out1 = a1 + frac_fr * (n1 - a1);  
-};
+    auto a = _buffer[int_fr];
+    auto n = _buffer[next_fr];
 
-void Buffer::_read(size_t frame, float& out0, float& out1) {
-    frame %= _size;
-    auto f = _buffer[frame];
-    out0 = f.l;
-    out1 = f.r;
+    out0 = a.l + frac_fr * (n.l - a.l);
+    out1 = a.r + frac_fr * (n.r - a.r);
 
-    _read_head = frame;
+    _read_head = next_fr;
 };
 
 void Buffer::write(const float in0, const float in1) 

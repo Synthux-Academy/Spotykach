@@ -22,6 +22,7 @@ _through_loop_ticks  { 0 },
 _active_slices_count { 0 },
 _mode                { Mode::None },
 _pending_mode        { Mode::None },
+_target_mode         { Mode::None },
 _is_armed            { false },
 _is_play_queued      { false },
 _is_record_queued    { false },
@@ -34,6 +35,7 @@ void Deck::init(const Params p)
 
     _mix_smooth.init(p.sample_rate);
 
+    _buffer.ref = ref;
     _buffer.init(p.main_buf, p.main_buf_size);
     _detector.init(p.detect_buf);
 
@@ -58,11 +60,51 @@ void Deck::init(const Params p)
     auto on_event_off = std::bind(&Deck::_on_dispatcher_event_off, this, _1);
     _dispatcher.set_on_event_off(on_event_off);
 };
+
+// Commands /////////////////////////////////////
+void Deck::_enqueue_command(const Command::Type type, const Mode mode, const Event* event)
+{
+    Command c;
+    c.type = type;
+    c.mode = mode;
+    c.event = event ? *event : make_event();
+    _commands.push(c);
+}
+void Deck::process_commands()
+{
+    Command c;
+    while (_commands.pop(c)) {
+        switch (c.type) {
+            case Command::Type::SetMode:       _validate_mode(c.mode);  break;
+            case Command::Type::Trigger:       _trigger(&c.event);      break;
+            case Command::Type::TogglePlay:    _toggle_play();          break;
+            case Command::Type::Play:          _play();                 break;
+            case Command::Type::Stop:          _stop();                 break;
+            case Command::Type::ClearSequence: _clear_sequence();       break;
+        }
+    }
+}
+
+// Mode /////////////////////////////////////////
 void Deck::set_mode(const Mode new_mode)
 {
-    if (new_mode == _mode || new_mode == _pending_mode) return;
+    _target_mode = new_mode;
+    _enqueue_command(Command::Type::SetMode, new_mode);
+}
+void Deck::_validate_mode(const Mode new_mode)
+{
+    if (new_mode == _mode) {
+        /* If switched back before the pending switch completed. */
+        _pending_mode = Mode::None;
+        return;
+    }
+    if (new_mode == _pending_mode) {
+        return;
+    }
+    /* Let all the voices settle first 
+       to prevent overload while switching 
+       to Drift. */
     if (_generator.is_generating()
-        && _mode == Mode::Slice 
         && new_mode == Mode::Drift 
         && _pending_mode == Mode::None) {
         _pending_mode = new_mode;
@@ -218,12 +260,12 @@ void Deck::tick(const bool common_tick, const bool is_key)
         switch (_mode) {
             case Mode::Slice: {
                 _clock_recording();
-                if (_is_play_queued) play();
+                if (_is_play_queued) _play();
             }
             break;
 
             default:
-                if (!_track.is_empty() && _is_play_queued) play();
+                if (!_track.is_empty() && _is_play_queued) _play();
         }
         
     }
@@ -266,10 +308,14 @@ void Deck::_quantize_loop(const float norm_size)
 }
 
 // Play /////////////////////////////////////////
-void Deck::toggle_play() 
+void Deck::toggle_play() { _enqueue_command(Command::Type::TogglePlay); }
+void Deck::play() { _enqueue_command(Command::Type::Play); }
+void Deck::stop() { _enqueue_command(Command::Type::Stop); }
+
+void Deck::_toggle_play() 
 {   
     if (_is_playing) {
-        stop();
+        _stop();
         return;
     }
 
@@ -284,9 +330,9 @@ void Deck::toggle_play()
         return;
     }
 
-    play();
+    _play();
 };
-void Deck::play() {
+void Deck::_play() {
     _is_play_queued = false;
     _is_playing = true;
 
@@ -306,7 +352,7 @@ void Deck::play() {
         case Mode::None: break;
     }
 };
-void Deck::stop()
+void Deck::_stop()
 {
     _is_playing = false;
     _loop_tick_count = -1;
@@ -373,7 +419,7 @@ void Deck::process_in(const float in0, const float in1)
         _is_cut_queued = false;
         switch (_mode) {
             case Mode::Slice: make_grid(); _is_play_queued = true; break;
-            default: play(); break;
+            default: _play(); break;
         }
     }
 }
@@ -390,7 +436,10 @@ void Deck::_resolve_in_out_mix() {
 }
 
 // Trigger //////////////////////////////////////////
-void Deck::trigger(Event* event) 
+void Deck::trigger(const Event* event) { _enqueue_command(Command::Type::Trigger, Mode::None, event); }
+void Deck::clear_sequence() { _enqueue_command(Command::Type::ClearSequence); }
+
+void Deck::_trigger(const Event* event) 
 {
     if (is_empty() 
     || (is_recording() && !is_overdubbing()) 
@@ -410,7 +459,7 @@ void Deck::trigger(Event* event)
     }   
     _dispatcher.event_on(event, _mode != Mode::Slice || is_mono);
 };
-void Deck::clear_sequence() {
+void Deck::_clear_sequence() {
     _track.disarm(true);
     _track.clear();
     _dispatcher.all_off();
@@ -419,14 +468,13 @@ void Deck::clear_sequence() {
 void Deck::_on_vox_stop(const uint8_t vox_idx) 
 {   
     if (_mode == Mode::Slice) {
-        /* if switching to Drift is pending. */
         if (!_generator.is_generating() && _pending_mode != Mode::None) {
             _set_mode(_pending_mode);
             _dispatch();
         }
     }
     else if (_needs_kickstart()) {
-        /* that's where the looping in Reel and Drift is happening */
+        /* that's where the looping in Reel is happening */
         _dispatch();
     }
 };
