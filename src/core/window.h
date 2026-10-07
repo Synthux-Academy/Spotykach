@@ -6,8 +6,10 @@
 #include "config.h"
 #include "nocopy.h"
 #include "buffer.h"
+#include "phasor.h"
 #include "xfade.h"
 #include "skip.write.head.h"
+#include "expose.h"
 
 namespace spotykach {
 
@@ -25,10 +27,11 @@ public:
 
   Window():
     _start        { 0.f },
-    _playhead     { 0.f },
+    _playhead     { },
+    _readhead     { },
     _increment    { 1.f },
-    _loop_start   { 0.f },
-    _loop_length  { 0 },
+    _loop_start   { },
+    _loop_length  { },
     _iterator     { 0 },
     _interp       { Interpolation::cubic },
     _position     { Position::absolute },
@@ -40,7 +43,7 @@ public:
     }
 
     struct Params {
-      float start;
+      Phasor start;
       size_t size;
       float loop_start; 
       float loop_length;
@@ -55,14 +58,14 @@ public:
         _size = p.size;
         _slope_out_start = _size - kWindowSlope;
 
-        _loop_start = p.loop_start;
-        _loop_length = p.loop_length;
+        _loop_start = Phasor(p.loop_start);
+        _loop_length = Phasor(p.loop_length);
         
-        _steady_playhead = p.start;
+        _steady_playhead = p.start.integral();
         _iterator = 0;
 
         _playhead = p.start;
-        _increment = p.increment;
+        _increment = Phasor(p.increment);
         
         _interp = p.interp;
         _position = p.pos;
@@ -86,9 +89,9 @@ public:
     void set_reverse(const bool reverse)
     {
       if (reverse != _is_reverse) {
-        auto base = _position == Position::absolute ? _loop_length : _size;
+        auto base = _rev_base();
         _playhead = base - _playhead;
-        _steady_playhead = base - _steady_playhead;
+        _steady_playhead = (base - Phasor(_steady_playhead)).integral();
     
         _is_reverse = reverse;
       }
@@ -102,36 +105,36 @@ public:
       return _iterator == _slope_out_start;  
     }
 
-    float play_head() const 
+    const Phasor& play_head() const 
     { 
       return _playhead; 
     }
 
-    float readhead() const 
+    const Phasor& readhead() const 
     {
       return _readhead;
     }
     
-    float steady_playhead() 
+    int32_t steady_playhead() const
     {
         return _steady_playhead;
     }
 
     void set_increment(const float val) 
     {
-      _increment = val;
+      _increment = Phasor(val);
     }
 
     void process(Buffer* buf, float& out0, float& out1) 
     {
         //Reverse playhead if needed
-        auto rev_base = _position == Position::absolute ? _loop_length : _size;
+        auto rev_base = _rev_base();
         _readhead = _is_reverse ? rev_base - _playhead : _playhead;
         _readhead += _loop_start;
-      
+        
         if (_is_init) {
           _is_init = false;
-          _skip_write_head_if_needed(buf, rev_base);
+          _skip_write_head_if_needed(buf, rev_base.integral());
         }
 
         buf->read_linear(_readhead, out0, out1);
@@ -153,6 +156,11 @@ public:
 private:
     NOCOPY(Window)
 
+    Phasor _rev_base() const
+    {
+      return _position == Position::absolute ? _loop_length : Phasor(static_cast<int32_t>(_size));
+    }
+
     float _attenuation() {
       if (_iterator < kWindowSlope) {
         return _is_first ? 1.f :  bleeptools::Hann::win().point(_iterator * kSlopeKof); //use fade-in of the slice
@@ -173,10 +181,10 @@ private:
       r.ph = &_playhead;
       r.rh = &_readhead;
       r.ws = &_size;
-      r.ls = _loop_start;
-      r.ll = _loop_length;
+      r.ls = _loop_start.integral();
+      r.ll = _loop_length.integral();
       r.rb = rev_base;
-      r.inc = _increment;
+      r.inc = _increment.to_float();
       r.wh = static_cast<int32_t>(buf->write_head());
       r.rs = static_cast<int32_t>(buf->rec_size());
       r.is_rev = _is_reverse;
@@ -190,11 +198,11 @@ private:
     static constexpr auto kSlopeKof = 1.f / kWindowSlope;
     
     float _start;
-    float _playhead;
-    float _readhead;
-    float _increment;
-    float _loop_start;
-    float _loop_length;
+    Phasor _playhead;
+    Phasor _readhead;
+    Phasor _increment;
+    Phasor _loop_start;
+    Phasor _loop_length;
     size_t _size;
     size_t _slope_out_start;
     int32_t _steady_playhead;

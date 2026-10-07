@@ -20,6 +20,8 @@ _midi               { CoreMIDI(hw, core) },
 _settings           { settings },
 _storage            { storage },
 _calibrator         { Calibrator(hw, settings) },
+_ply_cue            { Deck::Direction::none, Deck::Direction::none },
+_rec_cue            { Deck::Source::none, Deck::Source::none },
 _state              { State::launching },
 _show_key_quarter   { false },
 _clock_led_on       { false },
@@ -50,8 +52,8 @@ void CoreUI::init()
     auto on_clock_out = std::bind(&CoreUI::_process_clock_out, this);
     _core.driver().set_on_clock_out(on_clock_out);
 
-    auto on_play = std::bind(&CoreUI::_toggle_play, this, _1, _2);
-    auto on_record = std::bind(&CoreUI::_toggle_record, this, _1, _2);
+    auto on_play = std::bind(&CoreUI::_on_midi_play, this, _1, _2);
+    auto on_record = std::bind(&CoreUI::_on_midi_rec, this, _1, _2);
     auto on_note = std::bind(&CoreUI::_on_midi_note_on, this, _1, _2);
     auto on_cc = std::bind(&CoreUI::_on_midi_cc, this, _1, _2, _3);
     _midi.set_on_play(on_play);
@@ -160,6 +162,15 @@ void CoreUI::process()
         if (_hold_clear[ref].process()) {
             _hold_clear[ref].end();
             deck.clear_sequence();
+        }
+
+        if (_ply_cue[ref] != Deck::Direction::none) {
+            _toggle_play(ref, _ply_cue[ref] == Deck::Direction::rev);
+            _ply_cue[ref] = Deck::Direction::none;
+        }
+        if (_rec_cue[ref] != Deck::Source::none) {
+            _toggle_record(ref, _rec_cue[ref]);
+            _rec_cue[ref] = Deck::Source::none;
         }
 
         // LEDs /////////
@@ -489,7 +500,7 @@ void CoreUI::_process_switches()
     }
 
     // Mode A switch
-    Mode ma = deck_a.mode();
+    Mode ma = deck_a.target_mode();
     Mode nma = ma;
     if(sr1.test(6))      nma = Mode::Drift;
     else if(sr1.test(7)) nma = Mode::Reel;
@@ -516,7 +527,7 @@ void CoreUI::_process_switches()
     }
 
     // Mode B switch
-    Mode mb = deck_b.mode();
+    Mode mb = deck_b.target_mode();
     Mode nmb = mb;
     if(sr2.test(2))      nmb = Mode::Drift;
     else if(sr2.test(3)) nmb = Mode::Reel;
@@ -646,12 +657,11 @@ void CoreUI::_toggle_play(const Deck::Ref ref, const bool reverse)
     }
     deck.set_reverse(reverse);
 }
-void CoreUI::_toggle_record(const Deck::Ref ref, const bool internal)
-{
+void CoreUI::_toggle_record(const Deck::Ref ref, const Deck::Source src)
+{   
     if (!_storage.of(ref).is_idle()) return;
 
     auto& deck = _core.deck(ref);
-    auto src = internal ? Deck::Source::internal : Deck::Source::external;
     _core.set_source(src, ref);
     deck.toggle_recording();
     _storage.of(ref).reset_recent_slot();
@@ -696,4 +706,12 @@ void CoreUI::_on_midi_cc(const Deck::Ref ref, const CC cc, const float val)
         case CC::FluxMix:    _flux_mix[ref].set(val);    break;
         default: break;
     }
+}
+void CoreUI::_on_midi_play(const Deck::Ref ref, const bool reverse)
+{
+    _ply_cue[ref] = reverse ? Deck::Direction::rev : Deck::Direction::fwd;
+}
+void CoreUI::_on_midi_rec(const Deck::Ref ref, const bool internal)
+{
+    _rec_cue[ref] = internal ? Deck::Source::internal : Deck::Source::external;
 }

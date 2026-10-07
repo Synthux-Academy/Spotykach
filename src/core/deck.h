@@ -8,6 +8,7 @@
 #include "mode.h"
 #include "divider.h"
 #include "dispatcher.h"
+#include "irq.queue.h"
 #include "xfade.h"
 #include "fx/fx.h"
 #include "smooth.h"
@@ -26,7 +27,14 @@ public:
 
     enum class Source: uint8_t {
         external,
-        internal
+        internal,
+        none = 0xff
+    };
+
+    enum class Direction: uint8_t {
+        fwd,
+        rev,
+        none = 0xff
     };
 
     Deck();
@@ -48,11 +56,19 @@ public:
 
     void prepare();
 
+    /* 
+    Applies the commands posted with set_mode, trigger, toggle_play, play, stop and clear_sequence.
+    Must be called from the audio callback, which is the only context allowed
+    to touch the dispatcher and the voices.
+    */
+    void process_commands();
+
     void process_out(const float in0, const float in1, float& out0, float& out1);
     void process_in(const float in0, const float in1);
 
     bool is_generating() const { return _generator.is_generating(); }
 
+    /* Safe to call from any context: these are deferred to process_commands. */
     void toggle_play();
     void play();
     void stop();
@@ -68,10 +84,10 @@ public:
 
     void make_grid();
 
-    void clear_sequence();
+    void clear_sequence(); // deferred to process_commands
     
     void tick(const bool common_tick, const bool is_key);
-    void trigger(Event *);
+    void trigger(const Event *); // deferred to process_commands
     void reset_track_divider() { _pattern_divider.reset(); }
 
     float norm_playhead_at(const uint8_t idx) const;
@@ -85,7 +101,9 @@ public:
     float tempo_to_fit(const float frac);
 
     Mode mode() const { return _mode; }
-    void set_mode(const Mode val);
+    /* The mode the deck has been asked for. Can be ahead of mode() while a switch is in flight. */
+    Mode target_mode() const { return _target_mode; }
+    void set_mode(const Mode val); // deferred to process_commands
 
     void set_inout_mix(const float val);
     void inout_mix_mod_in(const float val);
@@ -100,7 +118,29 @@ public:
 private:
     NOCOPY(Deck)
 
+    struct Command {
+        enum class Type: uint8_t {
+            SetMode,
+            Trigger,
+            TogglePlay,
+            Play,
+            Stop,
+            ClearSequence
+        };
+        Type type;
+        Mode mode;
+        Event event;
+    };
+    void _enqueue_command(const Command::Type, const Mode = Mode::None, const Event* = nullptr);
+
+    void _validate_mode(const Mode);
     void _set_mode(const Mode);
+
+    void _toggle_play();
+    void _play();
+    void _stop();
+    void _trigger(const Event*);
+    void _clear_sequence();
 
     void _start_recording();
     void _stop_recording();
@@ -121,6 +161,7 @@ private:
     void _on_vox_stop(const uint8_t vox_idx);
     bool _needs_kickstart() const;
 
+    IrqQueue<Command, 16> _commands;
     Dispatcher<Generator::kVoxCount> _dispatcher;
     Detector        _detector;
     Buffer          _buffer;
@@ -149,6 +190,7 @@ private:
 
     Mode _mode;
     Mode _pending_mode;
+    volatile Mode _target_mode;
 
     bool _is_armed;  
     bool _is_play_queued;

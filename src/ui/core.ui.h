@@ -79,10 +79,12 @@ private:
     void _set_tempo_by_size(const Deck::Ref, const float fraction);
 
     void _toggle_play(const Deck::Ref, const bool reverse);
-    void _toggle_record(const Deck::Ref, const bool internal);
+    void _toggle_record(const Deck::Ref, const Deck::Source );
     void _trigger(const Deck::Ref, const float speed, const bool discont = false);
     void _on_midi_note_on(const Deck::Ref, const uint8_t num);
     void _on_midi_cc(const Deck::Ref, const CC, const float);
+    void _on_midi_play(const Deck::Ref, const bool reverse);
+    void _on_midi_rec(const Deck::Ref, const bool internal);
 
     // LEDs ...............................................
     void _draw_leds();
@@ -242,6 +244,9 @@ private:
     std::bitset<TouchedOptions> _touched;
     std::bitset<Deck::Ref::Count> _pitch_quantized;
 
+    std::array<Deck::Direction, Deck::Ref::Count> _ply_cue;
+    std::array<Deck::Source, Deck::Ref::Count> _rec_cue;
+    
     State _state;
     bool _show_key_quarter;
     bool _clock_led_on;

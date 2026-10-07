@@ -28,6 +28,8 @@ public:
   Vox();
   ~Vox() = default;
 
+  int ref;
+
   uint8_t idx() { return _vox_idx; }
 
   void init(Buffer* buffer, const uint8_t vox_idx);
@@ -80,7 +82,7 @@ private:
 
     void _seed();
 
-    void _activate(float playhead, const bool is_first = false);
+    void _activate(Phasor playhead, const bool is_first = false);
 
     void _do_trigger();
 
