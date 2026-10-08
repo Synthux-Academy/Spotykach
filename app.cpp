@@ -8,6 +8,7 @@
 #include "ui/core.ui.h"
 #include "core/core.h"
 #include "memory/storage.h"
+#include "transfer/service.h"
 #include "expose.h"
 
 // #define METER
@@ -38,6 +39,7 @@ class AppImpl {
     }
     Core& core() { return _core; }
     CoreUI& ui() { return _ui; }
+    bool is_transfer() const { return _is_transfer; }
 
     void ProcessAudio(AudioHandle::InputBuffer  in,
                       AudioHandle::OutputBuffer out,
@@ -45,6 +47,10 @@ class AppImpl {
 
   private:
     NOCOPY(AppImpl)
+
+    void _enter_transfer();
+    void _exit_transfer();
+    void _process_transfer();
 
     #if DEBUG
     StopwatchTimer _log_timer;
@@ -57,6 +63,10 @@ class AppImpl {
     Hardware    _hw;
     Settings    _settings;
     Storage     _storage;
+
+    transfer::Service _transfer;
+    volatile bool     _is_transfer { false };
+    uint32_t          _transfer_pads_ms { 0 };
 };
 };
 
@@ -67,8 +77,10 @@ static AppImpl impl;
 static int8_t leds_update_counter = 0;
 void T5Callback(void* data) 
 {
-    impl.ui().process_gate_in();
-    impl.core().prepare();
+    if (!impl.is_transfer()) {
+        impl.ui().process_gate_in();
+        impl.core().prepare();
+    }
     if (leds_update_counter++ == 3) {
         leds_update_counter = 0;
         impl.ui().render_leds();
@@ -121,6 +133,7 @@ void AppImpl::Init()
     
     _storage.init(_core.deck(Deck::A), _core.deck(Deck::B));
     _storage.read_settigs();
+    _transfer.init(&_storage.card(), SDRAMBuffer::pool().sourceBufferSize());
 
     Log::StartLog(false);
 #if DEBUG
@@ -156,8 +169,17 @@ void AppImpl::Loop()
             System::ResetToBootloader(System::BootloaderMode::DAISY_INFINITE_TIMEOUT);
         }
 
+        if (_is_transfer) {
+            _process_transfer();
+            continue;
+        }
+
         _ui.process();
         _storage.process();
+
+        #ifndef DEBUG
+        if (_ui.midi().take_transfer_request()) _enter_transfer();
+        #endif
         
         #if DEBUG
         if(_log_timer.HasPassedMs(250))
@@ -184,6 +206,12 @@ void AppImpl::ProcessAudio(AudioHandle::InputBuffer  in,
                            AudioHandle::OutputBuffer out,
                            size_t                    size)
 {
+    if (_is_transfer) {
+        auto channels = _hw.seed.audio_handle.GetChannels();
+        for (size_t ch = 0; ch < channels; ch++) std::fill(out[ch], out[ch] + size, 0.f);
+        return;
+    }
+
     #ifdef METER
     Meter::cpu().load.OnBlockStart();
     #endif
@@ -196,6 +224,71 @@ void AppImpl::ProcessAudio(AudioHandle::InputBuffer  in,
     #ifdef METER
     Meter::cpu().load.OnBlockEnd();
     #endif
+}
+
+// USB transfer mode //////////////////////////////
+void AppImpl::_enter_transfer()
+{
+    using transfer::EnterStatus;
+    auto& midi = _ui.midi();
+
+    if (_core.deck(Deck::A).is_recording() || _core.deck(Deck::B).is_recording()) {
+        midi.reply_transfer(static_cast<uint8_t>(EnterStatus::busy));
+        return;
+    }
+
+    switch (_storage.begin_transfer()) {
+        case Storage::TransferCheck::busy:
+            midi.reply_transfer(static_cast<uint8_t>(EnterStatus::busy));
+            return;
+        case Storage::TransferCheck::no_card:
+            midi.reply_transfer(static_cast<uint8_t>(EnterStatus::no_card));
+            return;
+        case Storage::TransferCheck::ok: break;
+    }
+
+    // Stop while the audio callback still runs, so the commands get processed
+    _core.deck(Deck::A).stop();
+    _core.deck(Deck::B).stop();
+
+    // The reply goes out from the audio callback, wait for it to leave
+    midi.reply_transfer(static_cast<uint8_t>(EnterStatus::ok));
+    auto start = System::GetNow();
+    while (midi.is_transfer_reply_pending() && System::GetNow() - start < 100) {}
+    System::Delay(20);
+
+    // From here on the audio callback is silent and doesn't touch USB MIDI
+    _is_transfer = true;
+    System::Delay(5);
+    _ui.set_transfer(true);
+
+    _hw.StopUsbMidi();
+    System::Delay(200); // so the host notices the disconnect
+    _transfer.begin();
+}
+
+void AppImpl::_exit_transfer()
+{
+    _transfer.end();
+    _storage.end_transfer();
+    System::Delay(200); // so the host notices the disconnect
+    _hw.StartUsbMidi();
+    _ui.set_transfer(false);
+    _is_transfer = false;
+}
+
+void AppImpl::_process_transfer()
+{
+    _transfer.process();
+    _ui.set_transfer_progress(_transfer.is_busy(), _transfer.progress());
+
+    auto exit = _transfer.should_exit();
+    auto now = System::GetNow();
+    if (now - _transfer_pads_ms >= 20) {
+        _transfer_pads_ms = now;
+        exit = _ui.process_transfer() || exit;
+    }
+    if (exit) _exit_transfer();
 }
 
 #if DEBUG

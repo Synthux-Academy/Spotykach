@@ -1,0 +1,960 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spotykach Sample Manager</title>
+<style>
+  :root {
+    --bg: #f6f5f2;
+    --surface: #ffffff;
+    --surface-2: #eeece7;
+    --text: #1d1c1a;
+    --muted: #6d6a64;
+    --border: #d9d6cf;
+    --accent: #1d1c1a;
+    --accent-text: #ffffff;
+    --error-bg: #fde8e6;
+    --error-text: #8a1c12;
+    --note-bg: #eef2fb;
+    --note-text: #23365f;
+    --progress: #1d1c1a;
+    --empty-text: #a29e96;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151514;
+      --surface: #1f1f1d;
+      --surface-2: #2a2a27;
+      --text: #ecebe7;
+      --muted: #9b988f;
+      --border: #3a3935;
+      --accent: #ecebe7;
+      --accent-text: #151514;
+      --error-bg: #3d1d1a;
+      --error-text: #ffb4aa;
+      --note-bg: #1d2533;
+      --note-text: #b9c9ea;
+      --progress: #ecebe7;
+      --empty-text: #6b6962;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: .01em; }
+  .status { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); }
+  .dot.on { background: #2fbf4a; }
+  .dot.wait { background: #e0a100; }
+  button {
+    font: inherit;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .info {
+    display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: center;
+    margin: 16px 0; padding: 12px 16px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  }
+  .info .label { color: var(--muted); margin-right: 6px; }
+  .space { display: flex; align-items: center; gap: 8px; min-width: 220px; }
+  .bar { flex: 1; height: 6px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
+  .bar > div { height: 100%; background: var(--progress); width: 0; }
+  .banner { margin: 12px 0; padding: 10px 14px; border-radius: 8px; display: flex; gap: 12px; justify-content: space-between; align-items: flex-start; }
+  .banner.error { background: var(--error-bg); color: var(--error-text); }
+  .banner.note { background: var(--note-bg); color: var(--note-text); }
+  .banner button { background: transparent; border: none; color: inherit; padding: 0 4px; }
+  .hidden { display: none !important; }
+  .grid-wrap { overflow-x: auto; }
+  .grid {
+    display: grid;
+    grid-template-columns: 110px repeat(6, minmax(130px, 1fr));
+    gap: 6px;
+    min-width: 900px;
+  }
+  .col-head { color: var(--muted); text-align: center; padding: 4px 0; }
+  .tape { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+  .cell {
+    position: relative;
+    min-height: 92px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px dashed var(--border);
+    background: transparent;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .cell.occupied { border-style: solid; background: var(--surface); border-left: 4px solid var(--tape); }
+  .cell.drop { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .cell .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cell .meta { color: var(--muted); font-size: 12px; }
+  .cell .empty { color: var(--empty-text); }
+  .cell .badge { font-size: 11px; color: var(--error-text); }
+  .cell .ops { margin-top: auto; display: flex; gap: 4px; flex-wrap: wrap; }
+  .cell .ops button { padding: 2px 8px; font-size: 12px; }
+  .cell .progress { margin-top: auto; }
+  .cell .progress .phase { font-size: 12px; color: var(--muted); }
+  .placeholder { color: var(--muted); padding: 48px 0; text-align: center; }
+  footer { margin-top: 24px; color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Spotykach Sample Manager</h1>
+    <div class="status"><span class="dot" id="dot"></span><span id="state">Disconnected</span></div>
+    <div class="actions">
+      <button class="primary" id="connect">Connect</button>
+      <button class="primary hidden" id="authorize">Authorise Spotykach serial port</button>
+      <button id="exit" disabled>Exit transfer mode</button>
+    </div>
+  </header>
+
+  <div class="banner error hidden" id="error"><span id="error-text"></span><button id="error-close" aria-label="Dismiss">✕</button></div>
+  <div class="banner note hidden" id="note"><span id="note-text"></span></div>
+
+  <section class="info hidden" id="info">
+    <span><span class="label">Firmware</span><span id="fw"></span></span>
+    <span><span class="label">Protocol</span><span id="proto"></span></span>
+    <span class="space"><span class="label">Card</span><span class="bar"><div id="space-bar"></div></span><span id="space"></span></span>
+  </section>
+
+  <div class="placeholder" id="placeholder">Connect to Spotykach to manage its sample slots.<br>
+    The device switches to transfer mode and stops audio while connected.</div>
+  <div class="grid-wrap hidden" id="grid-wrap"><div class="grid" id="grid"></div></div>
+
+  <input type="file" id="file" class="hidden" accept="audio/*,.wav,.mp3,.flac,.ogg,.opus,.m4a,.aac">
+
+  <footer>Uploads are converted to 48 kHz stereo 32-bit float and truncated to the deck buffer length. Cue points in WAV files are kept.</footer>
+</main>
+
+<script>
+"use strict";
+
+// Protocol (docs/usb-transfer.md) /////////////////////////////////////////////
+const VID = 0x0483, PID = 0x5740;
+const PROTO_MAJOR = 1;
+const SYSEX_ENTER = [0xF0, 0x7D, 0x53, 0x4B, 0x01, 0xF7];
+const CMD = {
+  hello: 0x01, ping: 0x02, list: 0x03,
+  uploadBegin: 0x10, uploadData: 0x11, uploadCommit: 0x12, uploadAbort: 0x13,
+  downloadOpen: 0x20, downloadRead: 0x21, downloadClose: 0x22,
+  remove: 0x30, exit: 0x7F,
+};
+const STATUS_TEXT = [
+  "OK",
+  "Transfer error (corrupted frame). Please retry.",
+  "The device doesn't know this command. Update the firmware.",
+  "The device is busy with another operation.",
+  "Invalid request.",
+  "SD card not available. Check the card and reconnect.",
+  "SD card read/write error.",
+  "The slot is empty.",
+  "Not enough free space on the SD card.",
+  "File is too large.",
+  "Transfer got out of sync. Please retry.",
+  "Upload was corrupted (checksum mismatch). Please retry.",
+  "The device rejected the file format.",
+];
+const ENTER_TEXT = {
+  1: "Spotykach is busy (loading, saving or recording). Finish that and try again.",
+  2: "No SD card found in Spotykach.",
+};
+const TAPES = [
+  { letter: "B", name: "Blue", color: "#3a5cff" },
+  { letter: "G", name: "Green", color: "#2fbf4a" },
+  { letter: "P", name: "Pink", color: "#ff4fd8" },
+  { letter: "R", name: "Red", color: "#ff3b3b" },
+  { letter: "T", name: "Turquoise", color: "#19d3c5" },
+  { letter: "Y", name: "Yellow", color: "#ffd21f" },
+];
+
+class DeviceError extends Error {
+  constructor(status, message) { super(message || STATUS_TEXT[status] || `Device error ${status}`); this.status = status; }
+}
+
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    t[i] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(data, crc = 0) {
+  crc = ~crc >>> 0;
+  for (let i = 0; i < data.length; i++) crc = CRC_TABLE[(crc ^ data[i]) & 0xff] ^ (crc >>> 8);
+  return ~crc >>> 0;
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+class Link {
+  constructor(port) {
+    this.port = port;
+    this.rx = new Uint8Array(0);
+    this.seq = 0;
+    this.pending = null;
+    this.lock = Promise.resolve();
+    this.closed = false;
+    this.onclose = null;
+  }
+
+  async open() {
+    await this.port.open({ baudRate: 115200, bufferSize: 65536 });
+    this.writer = this.port.writable.getWriter();
+    this.reader = this.port.readable.getReader();
+    this.readLoop();
+  }
+
+  async readLoop() {
+    try {
+      while (true) {
+        const { value, done } = await this.reader.read();
+        if (done) break;
+        if (value && value.length) this.append(value);
+      }
+    } catch (e) { /* device went away */ }
+    this.shutdown(new Error("Connection to Spotykach lost."));
+  }
+
+  append(bytes) {
+    const merged = new Uint8Array(this.rx.length + bytes.length);
+    merged.set(this.rx); merged.set(bytes, this.rx.length);
+    this.rx = merged;
+    while (this.rx.length >= 12) {
+      if (this.rx[0] !== 0x53 || this.rx[1] !== 0x4B) { this.rx = this.rx.subarray(1); continue; }
+      const dv = new DataView(this.rx.buffer, this.rx.byteOffset);
+      const len = dv.getUint32(4, true);
+      if (len > 65536) { this.rx = this.rx.subarray(1); continue; }
+      if (this.rx.length < 12 + len) break;
+      const frame = this.rx.slice(0, 12 + len);
+      this.rx = this.rx.slice(12 + len);
+      const crc = crc32(frame.subarray(12), crc32(frame.subarray(2, 8)));
+      if (crc !== dv.getUint32(8, true)) { this.fail(new DeviceError(1)); continue; }
+      this.deliver(frame[2], frame[3], frame.subarray(12));
+    }
+  }
+
+  deliver(type, seq, payload) {
+    const p = this.pending;
+    if (!p) return;
+    if (type === 0x80) { this.fail(new DeviceError(payload[0] ?? 1)); return; }
+    if (type !== (p.type | 0x80) || seq !== p.seq) return; // stale response
+    this.pending = null;
+    clearTimeout(p.timer);
+    p.resolve(payload);
+  }
+
+  fail(error) {
+    const p = this.pending;
+    if (!p) return;
+    this.pending = null;
+    clearTimeout(p.timer);
+    p.reject(error);
+  }
+
+  shutdown(error) {
+    if (this.closed) return;
+    this.closed = true;
+    this.fail(error);
+    if (this.onclose) this.onclose(error);
+  }
+
+  async close() {
+    this.closed = true;
+    try { await this.reader.cancel(); } catch (e) {}
+    try { this.reader.releaseLock(); } catch (e) {}
+    try { this.writer.releaseLock(); } catch (e) {}
+    try { await this.port.close(); } catch (e) {}
+  }
+
+  // Requests are strictly one at a time
+  request(type, payload = new Uint8Array(0), timeout = 5000) {
+    const run = () => this._request(type, payload, timeout);
+    const result = this.lock.then(run, run);
+    this.lock = result.catch(() => {});
+    return result;
+  }
+
+  async _request(type, payload, timeout) {
+    if (this.closed) throw new Error("Not connected.");
+    this.seq = (this.seq + 1) & 0xff;
+    const frame = new Uint8Array(12 + payload.length);
+    const dv = new DataView(frame.buffer);
+    frame[0] = 0x53; frame[1] = 0x4B; frame[2] = type; frame[3] = this.seq;
+    dv.setUint32(4, payload.length, true);
+    frame.set(payload, 12);
+    dv.setUint32(8, crc32(payload, crc32(frame.subarray(2, 8))), true);
+    const response = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => this.fail(new Error("Spotykach didn't respond in time.")), timeout);
+      this.pending = { type, seq: this.seq, resolve, reject, timer };
+    });
+    await this.writer.write(frame);
+    const reply = await response;
+    if (reply[0] !== 0) throw new DeviceError(reply[0]);
+    return reply;
+  }
+}
+
+// Device commands ///////////////////////////////////////////////////////////
+function u8(...values) { return new Uint8Array(values); }
+function slotArgs(tape, slot) { return u8(tape, slot, 0, 0); }
+
+async function hello(link) {
+  const p = await link.request(CMD.hello);
+  const dv = new DataView(p.buffer, p.byteOffset, p.byteLength);
+  const fwLength = p[34];
+  return {
+    protoMajor: p[1], protoMinor: p[2],
+    tapes: p[3], slots: p[4],
+    tapeNames: new TextDecoder().decode(p.subarray(5, 11)),
+    maxChunk: dv.getUint32(14, true),
+    maxFrames: dv.getUint32(18, true),
+    maxCues: dv.getUint16(22, true),
+    totalKiB: dv.getUint32(26, true),
+    freeKiB: dv.getUint32(30, true),
+    firmware: new TextDecoder().decode(p.subarray(35, 35 + fwLength)),
+  };
+}
+
+async function list(link) {
+  const p = await link.request(CMD.list, undefined, 15000);
+  const dv = new DataView(p.buffer, p.byteOffset, p.byteLength);
+  const count = p[1];
+  const slots = [];
+  let o = 2;
+  for (let i = 0; i < count; i++) {
+    const nameLength = p[o + 3];
+    slots.push({
+      tape: p[o], slot: p[o + 1], flags: p[o + 2],
+      fileSize: dv.getUint32(o + 4, true),
+      frames: dv.getUint32(o + 8, true),
+      sampleRate: dv.getUint32(o + 12, true),
+      cues: dv.getUint16(o + 16, true),
+      channels: p[o + 18], bits: p[o + 19],
+      name: new TextDecoder().decode(p.subarray(o + 20, o + 20 + nameLength)),
+    });
+    o += 20 + nameLength;
+  }
+  return slots;
+}
+
+async function upload(link, tape, slot, bytes, maxChunk, onProgress) {
+  const begin = new Uint8Array(12);
+  const dv = new DataView(begin.buffer);
+  begin.set(slotArgs(tape, slot));
+  dv.setUint32(4, bytes.length, true);
+  dv.setUint32(8, crc32(bytes), true);
+  await link.request(CMD.uploadBegin, begin, 10000);
+  try {
+    for (let offset = 0; offset < bytes.length; offset += maxChunk) {
+      const chunk = bytes.subarray(offset, Math.min(offset + maxChunk, bytes.length));
+      const payload = new Uint8Array(4 + chunk.length);
+      new DataView(payload.buffer).setUint32(0, offset, true);
+      payload.set(chunk, 4);
+      await link.request(CMD.uploadData, payload, 10000);
+      onProgress((offset + chunk.length) / bytes.length);
+    }
+    onProgress(1, "Verifying…");
+    await link.request(CMD.uploadCommit, undefined, 10000);
+  } catch (e) {
+    if (!link.closed) { try { await link.request(CMD.uploadAbort); } catch (_) {} }
+    throw e;
+  }
+}
+
+async function download(link, tape, slot, maxChunk, onProgress) {
+  const open = await link.request(CMD.downloadOpen, slotArgs(tape, slot));
+  const size = new DataView(open.buffer, open.byteOffset).getUint32(4, true);
+  const out = new Uint8Array(size);
+  try {
+    for (let offset = 0; offset < size; offset += maxChunk) {
+      const length = Math.min(maxChunk, size - offset);
+      const args = new Uint8Array(8);
+      const dv = new DataView(args.buffer);
+      dv.setUint32(0, offset, true);
+      dv.setUint32(4, length, true);
+      const p = await link.request(CMD.downloadRead, args, 10000);
+      out.set(p.subarray(4, 4 + length), offset);
+      onProgress((offset + length) / size);
+    }
+  } finally {
+    if (!link.closed) { try { await link.request(CMD.downloadClose); } catch (_) {} }
+  }
+  return out;
+}
+
+// Audio conversion //////////////////////////////////////////////////////////
+const fourcc = (b, o) => String.fromCharCode(b[o], b[o + 1], b[o + 2], b[o + 3]);
+
+/* Sample rate and cue points of a source WAV, wherever the cue chunk is. */
+function readWavMeta(bytes) {
+  if (bytes.length < 12 || fourcc(bytes, 0) !== "RIFF" || fourcc(bytes, 8) !== "WAVE") return null;
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let sampleRate = 0;
+  let cues = [];
+  let o = 12;
+  while (o + 8 <= bytes.length) {
+    const id = fourcc(bytes, o);
+    const size = dv.getUint32(o + 4, true);
+    const body = o + 8;
+    if (id === "fmt " && body + 8 <= bytes.length) sampleRate = dv.getUint32(body + 4, true);
+    if (id === "cue " && body + 4 <= bytes.length) {
+      const count = dv.getUint32(body, true);
+      for (let i = 0; i < count; i++) {
+        const at = body + 4 + i * 24 + 20;
+        if (at + 4 > bytes.length) break;
+        cues.push(dv.getUint32(at, true));
+      }
+    }
+    o = body + size + (size % 2);
+  }
+  return { sampleRate, cues };
+}
+
+function utf8Truncate(text, maxBytes) {
+  const enc = new TextEncoder();
+  let bytes = enc.encode(text);
+  while (bytes.length > maxBytes) {
+    text = text.slice(0, -1);
+    bytes = enc.encode(text);
+  }
+  return bytes;
+}
+
+function encodeWav(left, right, cues, nameBytes) {
+  const frames = left.length;
+  const dataSize = frames * 8;
+  const fmtSize = 8 + 16;
+  const inamSize = nameBytes.length ? nameBytes.length + 1 : 0;
+  const inamPadded = inamSize + (inamSize % 2);
+  const listSize = inamSize ? 8 + 4 + 8 + inamPadded : 0;
+  const cueSize = cues.length ? 8 + 4 + cues.length * 24 : 0;
+  const total = 12 + fmtSize + listSize + 8 + dataSize + cueSize;
+
+  const out = new Uint8Array(total);
+  const dv = new DataView(out.buffer);
+  const id = (o, s) => { for (let i = 0; i < 4; i++) out[o + i] = s.charCodeAt(i); };
+  let o = 0;
+  id(o, "RIFF"); dv.setUint32(o + 4, total - 8, true); id(o + 8, "WAVE"); o += 12;
+
+  id(o, "fmt "); dv.setUint32(o + 4, 16, true);
+  dv.setUint16(o + 8, 3, true);        // IEEE float
+  dv.setUint16(o + 10, 2, true);       // channels
+  dv.setUint32(o + 12, 48000, true);
+  dv.setUint32(o + 16, 48000 * 8, true);
+  dv.setUint16(o + 20, 8, true);       // block align
+  dv.setUint16(o + 22, 32, true);
+  o += fmtSize;
+
+  if (listSize) {
+    id(o, "LIST"); dv.setUint32(o + 4, listSize - 8, true); id(o + 8, "INFO");
+    id(o + 12, "INAM"); dv.setUint32(o + 16, inamSize, true);
+    out.set(nameBytes, o + 20); // NUL terminator and padding are already zero
+    o += listSize;
+  }
+
+  id(o, "data"); dv.setUint32(o + 4, dataSize, true); o += 8;
+  for (let i = 0; i < frames; i++) {
+    dv.setFloat32(o, left[i], true);
+    dv.setFloat32(o + 4, right[i], true);
+    o += 8;
+  }
+
+  if (cueSize) {
+    id(o, "cue "); dv.setUint32(o + 4, cueSize - 8, true); dv.setUint32(o + 8, cues.length, true);
+    o += 12;
+    cues.forEach((offset, i) => {
+      dv.setUint32(o, i + 1, true);
+      dv.setUint32(o + 4, offset, true);
+      id(o + 8, "data");
+      dv.setUint32(o + 12, 0, true);
+      dv.setUint32(o + 16, 0, true);
+      dv.setUint32(o + 20, offset, true);
+      o += 24;
+    });
+  }
+  return out;
+}
+
+async function convert(file, maxFrames, maxCues) {
+  const source = new Uint8Array(await file.arrayBuffer());
+  const meta = readWavMeta(source);
+
+  let audio;
+  try {
+    const ctx = new OfflineAudioContext(2, 1, 48000); // decoding resamples to 48 kHz
+    audio = await ctx.decodeAudioData(source.slice().buffer);
+  } catch (e) {
+    throw new Error(`Can't decode "${file.name}". Supported: WAV, MP3, FLAC, Ogg, AAC/M4A.`);
+  }
+
+  const frames = Math.min(audio.length, maxFrames);
+  const left = audio.getChannelData(0).subarray(0, frames);
+  const right = (audio.numberOfChannels > 1 ? audio.getChannelData(1) : audio.getChannelData(0)).subarray(0, frames);
+
+  let cues = [];
+  if (meta && meta.cues.length && meta.sampleRate) {
+    const ratio = 48000 / meta.sampleRate;
+    cues = [...new Set(meta.cues.map(c => Math.round(c * ratio)))]
+      .filter(c => c < frames)
+      .sort((a, b) => a - b)
+      .slice(0, maxCues);
+  }
+
+  const nameBytes = utf8Truncate(file.name, 64);
+  return {
+    bytes: encodeWav(left, right, cues, nameBytes),
+    truncated: audio.length > maxFrames,
+    cues: cues.length,
+  };
+}
+
+// UI ////////////////////////////////////////////////////////////////////////
+const $ = id => document.getElementById(id);
+const ui = {
+  link: null,
+  device: null,
+  slots: [],
+  busy: null,          // { tape, slot, phase, progress }
+  pingTimer: null,
+  pendingSlot: null,   // upload target picked via the file dialog
+};
+
+function setState(text, dot) {
+  $("state").textContent = text;
+  $("dot").className = "dot" + (dot ? " " + dot : "");
+}
+function showError(message) {
+  $("error-text").textContent = message;
+  $("error").classList.remove("hidden");
+}
+function clearError() { $("error").classList.add("hidden"); }
+function showNote(message) {
+  $("note-text").textContent = message || "";
+  $("note").classList.toggle("hidden", !message);
+}
+function formatDuration(frames, rate) {
+  if (!rate) return "—";
+  const seconds = frames / rate;
+  const m = Math.floor(seconds / 60);
+  const s = seconds - m * 60;
+  return `${m}:${s.toFixed(1).padStart(4, "0")}`;
+}
+function formatSize(kib) {
+  if (kib >= 1024 * 1024) return (kib / 1024 / 1024).toFixed(1) + " GB";
+  return (kib / 1024).toFixed(0) + " MB";
+}
+function slotAt(tape, slot) { return ui.slots.find(s => s.tape === tape && s.slot === slot); }
+
+function render() {
+  const connected = !!ui.link;
+  $("connect").classList.toggle("hidden", connected);
+  $("exit").disabled = !connected;
+  $("info").classList.toggle("hidden", !connected || !ui.device);
+  $("placeholder").classList.toggle("hidden", connected);
+  $("grid-wrap").classList.toggle("hidden", !connected);
+
+  if (ui.device) {
+    const d = ui.device;
+    $("fw").textContent = d.firmware || "unknown";
+    $("proto").textContent = `${d.protoMajor}.${d.protoMinor}`;
+    const used = d.totalKiB ? (d.totalKiB - d.freeKiB) / d.totalKiB : 0;
+    $("space-bar").style.width = (used * 100).toFixed(1) + "%";
+    $("space").textContent = `${formatSize(d.freeKiB)} free of ${formatSize(d.totalKiB)}`;
+  }
+  if (!connected) return;
+
+  const grid = $("grid");
+  grid.replaceChildren();
+  grid.append(document.createElement("div"));
+  for (let s = 0; s < 6; s++) {
+    const h = document.createElement("div");
+    h.className = "col-head";
+    h.textContent = `Slot ${s + 1}`;
+    grid.append(h);
+  }
+  TAPES.forEach((tapeInfo, tape) => {
+    const head = document.createElement("div");
+    head.className = "tape";
+    head.innerHTML = `<span class="swatch" style="background:${tapeInfo.color}"></span>`;
+    head.append(tapeInfo.name);
+    grid.append(head);
+    for (let slot = 0; slot < 6; slot++) grid.append(renderCell(tape, slot, tapeInfo));
+  });
+}
+
+function renderCell(tape, slot, tapeInfo) {
+  const info = slotAt(tape, slot);
+  const occupied = info && (info.flags & 1);
+  const cell = document.createElement("div");
+  cell.className = "cell" + (occupied ? " occupied" : "");
+  cell.style.setProperty("--tape", tapeInfo.color);
+  const isBusy = ui.busy && ui.busy.tape === tape && ui.busy.slot === slot;
+  const locked = !!ui.busy;
+
+  if (occupied) {
+    const name = document.createElement("div");
+    name.className = "name";
+    name.textContent = info.name || "—";
+    name.title = info.name || `${tapeInfo.letter}${slot + 1}.wav`;
+    cell.append(name);
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = `${formatDuration(info.frames, info.sampleRate)} · ${info.cues} cue${info.cues === 1 ? "" : "s"}`;
+    cell.append(meta);
+    if (!(info.flags & 2)) {
+      const badge = document.createElement("div");
+      badge.className = "badge";
+      badge.textContent = "Not loadable on the device";
+      cell.append(badge);
+    }
+  } else {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "Empty — drop a file";
+    cell.append(empty);
+  }
+
+  if (isBusy) {
+    const progress = document.createElement("div");
+    progress.className = "progress";
+    progress.innerHTML = `<div class="phase"></div><div class="bar"><div></div></div>`;
+    progress.querySelector(".phase").textContent = ui.busy.phase;
+    progress.querySelector(".bar > div").style.width = (ui.busy.progress * 100).toFixed(1) + "%";
+    cell.append(progress);
+  } else {
+    const ops = document.createElement("div");
+    ops.className = "ops";
+    const add = (label, handler) => {
+      const b = document.createElement("button");
+      b.textContent = label;
+      b.disabled = locked;
+      b.onclick = handler;
+      ops.append(b);
+    };
+    add(occupied ? "Replace" : "Upload", () => pickFile(tape, slot));
+    if (occupied) {
+      add("Download", () => runDownload(tape, slot));
+      add("Delete", () => runDelete(tape, slot));
+    }
+    cell.append(ops);
+  }
+
+  cell.addEventListener("dragover", e => {
+    if (ui.busy) return;
+    e.preventDefault();
+    cell.classList.add("drop");
+  });
+  cell.addEventListener("dragleave", () => cell.classList.remove("drop"));
+  cell.addEventListener("drop", e => {
+    e.preventDefault();
+    cell.classList.remove("drop");
+    const file = e.dataTransfer.files[0];
+    if (file && !ui.busy) runUpload(tape, slot, file);
+  });
+  return cell;
+}
+
+function setBusy(tape, slot, phase, progress = 0) {
+  ui.busy = { tape, slot, phase, progress };
+  render();
+}
+function updateBusy(phase, progress) {
+  if (!ui.busy) return;
+  ui.busy.phase = phase ?? ui.busy.phase;
+  ui.busy.progress = progress;
+  const cell = document.querySelector(".cell .progress");
+  if (cell) {
+    cell.querySelector(".phase").textContent = ui.busy.phase;
+    cell.querySelector(".bar > div").style.width = (progress * 100).toFixed(1) + "%";
+  }
+}
+
+async function operation(tape, slot, phase, work) {
+  clearError();
+  setBusy(tape, slot, phase);
+  try {
+    await work();
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    ui.busy = null;
+    if (ui.link) {
+      try { ui.slots = await list(ui.link); ui.device = await hello(ui.link); } catch (e) { showError(e.message); }
+    }
+    render();
+  }
+}
+
+function pickFile(tape, slot) {
+  ui.pendingSlot = { tape, slot };
+  $("file").value = "";
+  $("file").click();
+}
+$("file").addEventListener("change", () => {
+  const file = $("file").files[0];
+  if (file && ui.pendingSlot) runUpload(ui.pendingSlot.tape, ui.pendingSlot.slot, file);
+  ui.pendingSlot = null;
+});
+
+function runUpload(tape, slot, file) {
+  return operation(tape, slot, "Converting…", async () => {
+    const d = ui.device;
+    const converted = await convert(file, d.maxFrames, d.maxCues);
+    if (converted.truncated) showNote(`"${file.name}" was truncated to ${(d.maxFrames / 48000).toFixed(0)} s.`);
+    else showNote("");
+    updateBusy("Uploading…", 0);
+    await upload(ui.link, tape, slot, converted.bytes, d.maxChunk, (p, phase) => updateBusy(phase || "Uploading…", p));
+  });
+}
+
+function downloadName(info, tape, slot) {
+  let base = info && info.name ? info.name.replace(/\.[^./\\]*$/, "") : "";
+  if (!base) base = `${TAPES[tape].letter}${slot + 1}`;
+  return base.replace(/[\\/:*?"<>|\x00-\x1f]/g, "_") + ".wav";
+}
+
+function runDownload(tape, slot) {
+  const info = slotAt(tape, slot);
+  return operation(tape, slot, "Downloading…", async () => {
+    const bytes = await download(ui.link, tape, slot, ui.device.maxChunk, p => updateBusy("Downloading…", p));
+    const url = URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = downloadName(info, tape, slot);
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  });
+}
+
+function runDelete(tape, slot) {
+  return operation(tape, slot, "Deleting…", async () => {
+    await ui.link.request(CMD.remove, slotArgs(tape, slot));
+  });
+}
+
+// Connection ////////////////////////////////////////////////////////////////
+const isLinux = /Linux/.test(navigator.platform) && !/Android/.test(navigator.userAgent);
+const isWindows = /Win/.test(navigator.platform);
+
+async function grantedPort() {
+  const ports = await navigator.serial.getPorts();
+  return ports.find(p => {
+    const i = p.getInfo();
+    return i.usbVendorId === VID && i.usbProductId === PID;
+  });
+}
+
+async function enterTransferMode() {
+  let access;
+  try {
+    access = await navigator.requestMIDIAccess({ sysex: true });
+  } catch (e) {
+    throw new Error("MIDI access was denied. Spotykach is switched to transfer mode via MIDI SysEx — please allow it.");
+  }
+  const match = port => /spotykach/i.test(port.name || "");
+  const outputs = [...access.outputs.values()].filter(match);
+  const inputs = [...access.inputs.values()].filter(match);
+  if (!outputs.length) {
+    throw new Error("Spotykach MIDI port not found. Is it connected via the rear USB-C port?"
+      + (isWindows ? " On Windows, close other apps (e.g. your DAW) that use its MIDI port." : ""));
+  }
+
+  const reply = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      inputs.forEach(i => i.onmidimessage = null);
+      reject(new Error("Spotykach did not respond. Make sure its firmware supports sample transfer."
+        + (isWindows ? " On Windows, close other apps (e.g. your DAW) that use its MIDI port." : "")));
+    }, 3000);
+    inputs.forEach(input => {
+      input.onmidimessage = e => {
+        const d = e.data;
+        if (d.length === 7 && d[0] === 0xF0 && d[1] === 0x7D && d[2] === 0x53 && d[3] === 0x4B && d[4] === 0x02) {
+          clearTimeout(timer);
+          inputs.forEach(i => i.onmidimessage = null);
+          resolve(d[5]);
+        }
+      };
+    });
+  });
+  try {
+    outputs[0].send(SYSEX_ENTER);
+  } catch (e) {
+    throw new Error("Can't send to the Spotykach MIDI port."
+      + (isWindows ? " On Windows, close other apps (e.g. your DAW) that use it." : ""));
+  }
+  const status = await reply;
+  if (status !== 0) throw new Error(ENTER_TEXT[status] || `Spotykach refused transfer mode (${status}).`);
+}
+
+async function waitForPort(timeoutMs) {
+  const start = performance.now();
+  while (performance.now() - start < timeoutMs) {
+    const port = await grantedPort();
+    if (port) return port;
+    await sleep(250);
+  }
+  return null;
+}
+
+async function openPort(port) {
+  setState("Opening serial port…", "wait");
+  const link = new Link(port);
+  let opened = false;
+  for (let attempt = 0; attempt < 8 && !opened; attempt++) {
+    try { await link.open(); opened = true; } catch (e) { await sleep(250); }
+  }
+  if (!opened) {
+    throw new Error("Can't open the Spotykach serial port."
+      + (isLinux ? " On Linux, add your user to the 'dialout' group (or 'uucp' on Arch) and log in again." : ""));
+  }
+  link.onclose = error => onDisconnected(error);
+  ui.link = link;
+
+  const device = await hello(link);
+  if (device.protoMajor !== PROTO_MAJOR) {
+    try { await link.request(CMD.exit); } catch (e) {}
+    throw new Error(`Spotykach uses protocol ${device.protoMajor}.${device.protoMinor}, this page supports ${PROTO_MAJOR}.x. Update the page or the firmware.`);
+  }
+  ui.device = device;
+  ui.slots = await list(link);
+  setState("Connected — transfer mode", "on");
+  startPing();
+  render();
+}
+
+function startPing() {
+  stopPing();
+  ui.pingTimer = setInterval(() => {
+    if (ui.link && !ui.busy) ui.link.request(CMD.ping).catch(() => {});
+  }, 2000);
+}
+function stopPing() {
+  if (ui.pingTimer) clearInterval(ui.pingTimer);
+  ui.pingTimer = null;
+}
+
+function onDisconnected(error) {
+  const wasConnected = !!ui.link;
+  stopPing();
+  ui.link = null;
+  ui.device = null;
+  ui.slots = [];
+  ui.busy = null;
+  setState("Disconnected", "");
+  if (wasConnected && error) showError(error.message + " The device may have left transfer mode.");
+  render();
+}
+
+async function connect() {
+  clearError();
+  showNote("");
+  $("connect").disabled = true;
+  try {
+    // The device may already be in transfer mode, e.g. after a page reload
+    let port = await grantedPort();
+    if (port) {
+      try { await openPort(port); return; } catch (e) { await disconnectQuietly(); }
+    }
+
+    setState("Switching to transfer mode…", "wait");
+    await enterTransferMode();
+
+    setState("Waiting for the serial port…", "wait");
+    port = await waitForPort(4000);
+    if (!port) {
+      // First use: Chrome needs a click to grant the serial port
+      setState("Waiting for permission…", "wait");
+      $("authorize").classList.remove("hidden");
+      $("connect").classList.add("hidden");
+      showNote("Click “Authorise Spotykach serial port” and select Spotykach. This is needed only once.");
+      return;
+    }
+    await openPort(port);
+  } catch (e) {
+    await disconnectQuietly();
+    setState("Disconnected", "");
+    showError(e.message);
+  } finally {
+    $("connect").disabled = false;
+  }
+}
+
+async function authorize() {
+  clearError();
+  try {
+    const port = await navigator.serial.requestPort({ filters: [{ usbVendorId: VID, usbProductId: PID }] });
+    $("authorize").classList.add("hidden");
+    showNote("");
+    await openPort(port);
+  } catch (e) {
+    if (e.name === "NotFoundError") { showError("No port selected. Spotykach leaves transfer mode after 10 s without a connection — press Connect to try again."); }
+    else showError(e.message);
+    $("authorize").classList.add("hidden");
+    await disconnectQuietly();
+    setState("Disconnected", "");
+    render();
+  }
+}
+
+async function disconnectQuietly() {
+  stopPing();
+  const link = ui.link;
+  ui.link = null;
+  ui.device = null;
+  if (link) await link.close();
+}
+
+async function exitTransfer() {
+  const link = ui.link;
+  if (!link) return;
+  $("exit").disabled = true;
+  stopPing();
+  try { await link.request(CMD.exit); } catch (e) {}
+  link.onclose = null;
+  await disconnectQuietly();
+  setState("Disconnected", "");
+  render();
+}
+
+// Boot //////////////////////////////////////////////////////////////////////
+$("connect").onclick = connect;
+$("authorize").onclick = authorize;
+$("exit").onclick = exitTransfer;
+$("error-close").onclick = clearError;
+window.addEventListener("dragover", e => e.preventDefault());
+window.addEventListener("drop", e => e.preventDefault());
+window.addEventListener("beforeunload", () => { if (ui.link) ui.link.request(CMD.exit).catch(() => {}); });
+
+if (!("serial" in navigator) || !("requestMIDIAccess" in navigator)) {
+  $("connect").disabled = true;
+  showError("This page needs Web Serial and Web MIDI. Please use a Chromium-based browser (Chrome, Edge, Opera) on macOS, Windows or Linux.");
+} else {
+  navigator.serial.addEventListener("disconnect", e => {
+    if (ui.link && e.target === ui.link.port) ui.link.shutdown(new Error("Spotykach disconnected."));
+  });
+  if (isLinux) showNote("Linux: Web Serial needs your user in the 'dialout' group (or 'uucp' on Arch).");
+}
+render();
+</script>
+</body>
+</html>

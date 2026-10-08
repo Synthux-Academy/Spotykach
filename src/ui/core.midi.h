@@ -32,8 +32,21 @@ public:
         _on_cc = on_cc;
     }
 
+    /* USB transfer mode request, set from the audio callback
+    when the "enter" SysEx arrives over USB MIDI. */
+    bool take_transfer_request()
+    {
+        auto is_requested = _transfer_requested;
+        _transfer_requested = false;
+        return is_requested;
+    }
+    /* Reply SysEx is sent from the next process() call */
+    void reply_transfer(const uint8_t status) { _transfer_reply = status; }
+    bool is_transfer_reply_pending() const { return _transfer_reply >= 0; }
+
 private:
-    bool _process_event(daisy::MidiEvent&);
+    bool _process_event(daisy::MidiEvent&, const bool is_usb);
+    void _process_sysex(daisy::MidiEvent&);
     bool _process_realtime(daisy::MidiEvent&);
     void _process_note_on(daisy::NoteOnEvent&);
     void _process_cc(daisy::ControlChangeEvent&);
@@ -47,5 +60,8 @@ private:
 
     Hardware&   _hw;
     Core&       _core;
+
+    volatile bool    _transfer_requested { false };
+    volatile int16_t _transfer_reply { -1 };
 };
 };

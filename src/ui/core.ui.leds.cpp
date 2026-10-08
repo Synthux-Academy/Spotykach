@@ -76,6 +76,11 @@ void CoreUI::_draw_leds()
         return;
     }
 
+    if (_is_transfer) {
+        _draw_transfer();
+        return;
+    }
+
     _breathe_led();
     
     auto& deck_a = _core.deck(Deck::A);
@@ -630,4 +635,31 @@ void CoreUI::_make_clock_color()
     auto& d = _core.driver();
     _clock_src_color = clock_source_color(d);
     _clock_color = clock_color(d, _show_key_quarter, _clock_src_color);
+}
+
+void CoreUI::_draw_transfer()
+{
+    _breathe_led();
+
+    // Both rings: breathing while idle, progress while a file is transferred.
+    // Play pads lit as they leave the mode.
+    for (auto ref: { Deck::A, Deck::B }) {
+        auto& ring = _ring[ref];
+        ring.clear();
+        ring.set_hex_color(kWhite);
+        if (_transfer_busy) {
+            ring.set_brightness(.8f);
+            ring.set_segment(0.f, _transfer_progress);
+        }
+        else {
+            ring.set_brightness(_led_breathe_brightness * .4f);
+            ring.set_segment(0.f, 1.f);
+        }
+        ring.set_updated();
+    }
+    _ring[Deck::A].apply(_hw, Hardware::LED_RING_A);
+    _ring[Deck::B].apply(_hw, Hardware::LED_RING_B);
+
+    _hw.leds.Set(Hardware::LED_PLAY_A, kWhite, .6f);
+    _hw.leds.Set(Hardware::LED_PLAY_B, kWhite, .6f);
 }

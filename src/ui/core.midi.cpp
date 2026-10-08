@@ -3,6 +3,7 @@
 #include "daisy.h"
 #include "core/config.h"
 #include "expose.h"
+#include "transfer/protocol.h"
 
 using namespace spotykach;
 using namespace daisy;
@@ -25,14 +26,29 @@ bool CoreMIDI::process()
     _hw.midi_uart.Listen();
     while(_hw.midi_uart.HasEvents()) {
         auto event = _hw.midi_uart.PopEvent();
-        has_clock = _process_event(event) || has_clock;
+        has_clock = _process_event(event, false) || has_clock;
     }
 
     #ifndef DEBUG
     _hw.midi_usb.Listen();
     while(_hw.midi_usb.HasEvents()) {
         auto event = _hw.midi_usb.PopEvent();
-        has_clock = _process_event(event) || has_clock;
+        has_clock = _process_event(event, true) || has_clock;
+    }
+
+    if (_transfer_reply >= 0) {
+        using namespace transfer;
+        const uint8_t reply[] = { 
+            0xF0, 
+            kSysExManufacturer, 
+            kSysExSignature[0], 
+            kSysExSignature[1], 
+            kSysExReply, 
+            static_cast<uint8_t>(_transfer_reply), 
+            0xF7 
+        };
+        _hw.midi_usb.SendMessage(reply, sizeof(reply));
+        _transfer_reply = -1;
     }
     #endif
 
@@ -45,9 +61,14 @@ bool CoreMIDI::process()
     
     return has_clock;
 }
-bool CoreMIDI::_process_event(daisy::MidiEvent& event)
+bool CoreMIDI::_process_event(daisy::MidiEvent& event, const bool is_usb)
 {
     switch(event.type) {
+        case MidiMessageType::SystemCommon: {
+            if (is_usb && event.sc_type == SystemCommonType::SystemExclusive) _process_sysex(event);
+            return false;
+        }
+
         case MidiMessageType::SystemRealTime: {
             return _process_realtime(event); 
         }
@@ -77,6 +98,20 @@ void CoreMIDI::_process_note_on(daisy::NoteOnEvent& note_on)
     else if (note_on.channel == c.midi_channel(Deck::B)) ref = Deck::B;
     if (ref != Deck::Count && _on_note_on) {
         _on_note_on(ref, note_on.note);
+    }
+}
+
+void CoreMIDI::_process_sysex(daisy::MidiEvent& event)
+{
+    using namespace transfer;
+    // Data comes without the F0/F7 framing
+    auto data = event.sysex_data;
+    if (event.sysex_message_len == 4
+        && data[0] == kSysExManufacturer
+        && data[1] == kSysExSignature[0]
+        && data[2] == kSysExSignature[1]
+        && data[3] == kSysExEnter) {
+        _transfer_requested = true;
     }
 }
 

@@ -50,6 +50,10 @@ private:
 
 
 // STATIC CONFIG ///////////////////////////////////////////////
+// Firmware .....................................
+// MAJOR.MINOR.PATCH, update together with the release tag (v1.3.1 <-> "1.3.1")
+static constexpr const char* kFirmwareVersion = "1.3.1";
+
 // Clock ........................................
 static constexpr uint8_t kPPQNIntern = 48;
 
@@ -75,6 +79,8 @@ static constexpr float kDefaultFeedback = 0.95f; //-3db at -60...0dB scale
 
 // Cue points ...................................
 static constexpr uint16_t kMaxSlicePointCount = 256;
+// One entry is reserved for the end slice appended after loading.
+static constexpr uint16_t kMaxFileCuePoints = kMaxSlicePointCount - 1;
 
 // MIDI ..........................................
 enum CC: uint8_t {
