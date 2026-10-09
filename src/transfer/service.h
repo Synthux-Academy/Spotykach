@@ -62,6 +62,7 @@ class Service {
     Session  _session;
     bool     _should_exit;
     uint32_t _last_frame_ms;
+    bool     _is_connected;
 
     uint8_t  _tape;
     uint8_t  _slot;

@@ -965,13 +965,19 @@ async function connect() {
     await enterTransferMode();
 
     setState("Waiting for the serial port…", "wait");
-    port = await waitForPort(4000);
+    port = await waitForPort(2500);
     if (!port) {
-      // First use: Chrome needs a click to grant the serial port
+      // First use: Chrome needs a user gesture to grant the serial port.
+      // The Connect click still counts for a few seconds, then open the picker
+      // right away; otherwise ask for another click.
       setState("Waiting for permission…", "wait");
-      $("authorize").classList.remove("hidden");
       $("connect").classList.add("hidden");
-      showNote("Click “Authorise Spotykach serial port” and select Spotykach. This is needed only once.");
+      showNote("Select Spotykach in the browser's port picker. This is needed only once per computer.");
+      if (navigator.userActivation && navigator.userActivation.isActive) {
+        await authorize();
+      } else {
+        $("authorize").classList.remove("hidden");
+      }
       return;
     }
     await openPort(port);
@@ -992,8 +998,13 @@ async function authorize() {
     showNote("");
     await openPort(port);
   } catch (e) {
-    if (e.name === "NotFoundError") { showError("No port selected. Spotykach leaves transfer mode after 10 s without a connection — press Connect to try again."); }
-    else showError(e.message);
+    if (e.name === "NotFoundError") {
+      // Picker closed without a selection: the device keeps waiting in transfer mode for a minute
+      $("authorize").classList.remove("hidden");
+      showError("No port selected. Click “Authorise Spotykach serial port” to try again within a minute, or touch Play on Spotykach to leave transfer mode.");
+      return;
+    }
+    showError(e.message);
     $("authorize").classList.add("hidden");
     await disconnectQuietly();
     setState("Disconnected", "");

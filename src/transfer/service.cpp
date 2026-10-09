@@ -11,6 +11,8 @@ using namespace spotykach;
 using namespace spotykach::transfer;
 
 static constexpr uint32_t kIdleTimeoutMs = 10000;
+// Before the first frame the user may still be picking the port in the browser
+static constexpr uint32_t kConnectTimeoutMs = 60000;
 static constexpr uint32_t kListHeaderRead = 4096;
 static constexpr uint32_t kListTailRead = 8192;
 static constexpr uint32_t kUploadOverhead = 65536; // header, name and cue chunks
@@ -43,6 +45,7 @@ void Service::begin()
     _remove_temp_files();
     _link.start();
     _last_frame_ms = daisy::System::GetNow();
+    _is_connected = false;
 }
 
 void Service::end()
@@ -70,11 +73,13 @@ void Service::process()
             break;
         case Link::Poll::frame:
             _last_frame_ms = daisy::System::GetNow();
+            _is_connected = true;
             _handle(frame);
             break;
     }
 
-    if (daisy::System::GetNow() - _last_frame_ms > kIdleTimeoutMs) {
+    auto timeout = _is_connected ? kIdleTimeoutMs : kConnectTimeoutMs;
+    if (daisy::System::GetNow() - _last_frame_ms > timeout) {
         _should_exit = true;
     }
 }
