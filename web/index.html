@@ -186,6 +186,9 @@ const TAPES = [
 class DeviceError extends Error {
   constructor(status, message) { super(message || STATUS_TEXT[status] || `Device error ${status}`); this.status = status; }
 }
+class TimeoutError extends Error {
+  constructor(detail) { super("Spotykach didn't respond in time."); this.detail = detail; }
+}
 
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
@@ -234,6 +237,7 @@ class Link {
   }
 
   append(bytes) {
+    this.lastRxMs = performance.now();
     const merged = new Uint8Array(this.rx.length + bytes.length);
     merged.set(this.rx); merged.set(bytes, this.rx.length);
     this.rx = merged;
@@ -257,15 +261,27 @@ class Link {
     if (type === 0x80) { this.fail(new DeviceError(payload[0] ?? 1)); return; }
     if (type !== (p.type | 0x80) || seq !== p.seq) return; // stale response
     this.pending = null;
-    clearTimeout(p.timer);
+    clearInterval(p.timer);
     p.resolve(payload);
   }
+
+  /* What had arrived when a request timed out: tells a silent device apart from bytes lost on the way */
+  rxState() {
+    const rx = this.rx;
+    if (rx.length < 12) return `${rx.length} bytes pending`;
+    const dv = new DataView(rx.buffer, rx.byteOffset);
+    const magic = rx[0] === 0x53 && rx[1] === 0x4B;
+    return `${rx.length} of ${12 + dv.getUint32(4, true)} bytes of a ${magic ? "" : "misaligned "}frame type 0x${rx[2].toString(16)} seq ${rx[3]} pending`;
+  }
+
+  /* Drops partially received data, e.g. before retrying a request */
+  resync() { this.rx = new Uint8Array(0); }
 
   fail(error) {
     const p = this.pending;
     if (!p) return;
     this.pending = null;
-    clearTimeout(p.timer);
+    clearInterval(p.timer);
     p.reject(error);
   }
 
@@ -285,14 +301,15 @@ class Link {
   }
 
   // Requests are strictly one at a time
-  request(type, payload = new Uint8Array(0), timeout = 5000) {
-    const run = () => this._request(type, payload, timeout);
+  /* stallMs: give up early once a reply has started arriving and then stops */
+  request(type, payload = new Uint8Array(0), timeout = 5000, stallMs = 0) {
+    const run = () => this._request(type, payload, timeout, stallMs);
     const result = this.lock.then(run, run);
     this.lock = result.catch(() => {});
     return result;
   }
 
-  async _request(type, payload, timeout) {
+  async _request(type, payload, timeout, stallMs) {
     if (this.closed) throw new Error("Not connected.");
     this.seq = (this.seq + 1) & 0xff;
     const frame = new Uint8Array(12 + payload.length);
@@ -302,7 +319,15 @@ class Link {
     frame.set(payload, 12);
     dv.setUint32(8, crc32(payload, crc32(frame.subarray(2, 8))), true);
     const response = new Promise((resolve, reject) => {
-      const timer = setTimeout(() => this.fail(new Error("Spotykach didn't respond in time.")), timeout);
+      const seq = this.seq;
+      const start = performance.now();
+      const timer = setInterval(() => {
+        const now = performance.now();
+        const stalled = stallMs > 0 && this.rx.length > 0 && now - this.lastRxMs > stallMs;
+        if (stalled || now - start > timeout) {
+          this.fail(new TimeoutError(`request 0x${type.toString(16)} seq ${seq}: ${this.rxState()}`));
+        }
+      }, 50);
       this.pending = { type, seq: this.seq, resolve, reject, timer };
     });
     await this.writer.write(frame);
@@ -379,24 +404,84 @@ async function upload(link, tape, slot, bytes, maxChunk, onProgress) {
   }
 }
 
+/*
+DOWNLOAD_READ asks for an absolute offset and length, so it can be repeated safely.
+On macOS the serial tty can drop bytes of large bursts when Chrome doesn't drain it
+fast enough, so the read size adapts: halve on a lost reply and stay below the size
+that failed; probe that size again only after a long run of clean reads.
+*/
+const kMinReadChunk = 1024;
+const kGrowAfter = 8;
+const kProbeAfter = 64;
+const kMaxFailuresInRow = 8;
+const kReadChunkKey = "spotykach.readChunk";
+
+/* The read size that worked last time on this computer, so a download doesn't start by losing replies */
+function loadReadChunk(maxChunk) {
+  try {
+    const saved = parseInt(localStorage.getItem(kReadChunkKey), 10);
+    if (saved >= kMinReadChunk) return Math.min(saved, maxChunk);
+  } catch (e) {}
+  return maxChunk;
+}
+function saveReadChunk(chunk) {
+  try { localStorage.setItem(kReadChunkKey, String(chunk)); } catch (e) {}
+}
+
 async function download(link, tape, slot, maxChunk, onProgress) {
   const open = await link.request(CMD.downloadOpen, slotArgs(tape, slot));
   const size = new DataView(open.buffer, open.byteOffset).getUint32(4, true);
   const out = new Uint8Array(size);
+  let chunk = loadReadChunk(maxChunk);
+  let ceiling = chunk;      // largest read size not known to fail
+  let clean = 0;
+  let failures = 0;
+  let failuresInRow = 0;
   try {
-    for (let offset = 0; offset < size; offset += maxChunk) {
-      const length = Math.min(maxChunk, size - offset);
+    for (let offset = 0; offset < size;) {
+      const length = Math.min(chunk, size - offset);
       const args = new Uint8Array(8);
       const dv = new DataView(args.buffer);
       dv.setUint32(0, offset, true);
       dv.setUint32(4, length, true);
-      const p = await link.request(CMD.downloadRead, args, 10000);
+      let p;
+      try {
+        p = await link.request(CMD.downloadRead, args, 1500, 300);
+      } catch (e) {
+        const retriable = e instanceof TimeoutError || (e instanceof DeviceError && e.status === 1);
+        const detail = `download at byte ${offset}, ${length} byte read: ${e.detail || e.message}`;
+        console.warn(detail);
+        failures++;
+        if (!retriable || link.closed || ++failuresInRow > kMaxFailuresInRow) {
+          e.message += ` (${detail})`;
+          throw e;
+        }
+        link.resync();
+        ceiling = Math.max(kMinReadChunk, chunk >> 1);
+        chunk = ceiling;
+        clean = 0;
+        continue;
+      }
       out.set(p.subarray(4, 4 + length), offset);
-      onProgress((offset + length) / size);
+      offset += length;
+      onProgress(offset / size);
+      failuresInRow = 0;
+      clean++;
+      if (chunk < ceiling && clean >= kGrowAfter) {
+        chunk = Math.min(ceiling, chunk << 1);
+        clean = 0;
+      }
+      else if (chunk === ceiling && ceiling < maxChunk && clean >= kProbeAfter) {
+        ceiling = Math.min(maxChunk, ceiling << 1);
+        chunk = ceiling;
+        clean = 0;
+      }
     }
   } finally {
     if (!link.closed) { try { await link.request(CMD.downloadClose); } catch (_) {} }
   }
+  saveReadChunk(ceiling);
+  if (failures) console.info(`download: ${failures} lost replies, finished with ${chunk} byte reads`);
   return out;
 }
 

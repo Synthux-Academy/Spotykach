@@ -648,7 +648,7 @@ void CoreUI::_draw_transfer()
         ring.clear();
         ring.set_hex_color(kWhite);
         if (_transfer_busy) {
-            ring.set_brightness(.8f);
+            ring.set_brightness(.5f);
             ring.set_segment(0.f, _transfer_progress);
         }
         else {
