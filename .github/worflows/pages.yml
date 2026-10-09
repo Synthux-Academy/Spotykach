@@ -1,0 +1,38 @@
+name: Sample manager (GitHub Pages)
+
+# Manual deploy: Actions → "Sample manager (GitHub Pages)" → Run workflow.
+# Publishes web/ from the given branch, tag or commit, so the page can be
+# deployed while the code stays on a feature branch.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit to deploy web/ from
+        required: true
+        default: uploader
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+      - id: deployment
+        uses: actions/deploy-pages@v4
