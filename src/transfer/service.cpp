@@ -68,8 +68,9 @@ void Service::process()
     switch (_link.poll(frame)) {
         case Link::Poll::none: break;
         case Link::Poll::error:
+            // The broken frame wasn't processed, the session stays as it was
+            // so the host can resend it.
             _link.send_status(kFrameErrorType, 0, Status::bad_frame);
-            _reset_session();
             break;
         case Link::Poll::frame:
             _last_frame_ms = daisy::System::GetNow();
@@ -338,10 +339,21 @@ void Service::_upload_begin(const Link::Frame& frame)
     _reply(frame, Status::ok);
 }
 
+/* UPLOAD_DATA replies carry the device's offset, so after a lost reply the host
+can tell whether the chunk was written and resend or continue accordingly. */
+void Service::_reply_upload(const Link::Frame& frame, const Status status)
+{
+    auto p = _link.payload();
+    p[0] = static_cast<uint8_t>(status);
+    p[1] = p[2] = p[3] = 0;
+    put_u32(&p[4], _offset);
+    _link.send(frame.type | kResponseFlag, frame.seq, 8);
+}
+
 void Service::_upload_data(const Link::Frame& frame)
 {
     if (frame.size < 4) {
-        _reply(frame, Status::bad_arg);
+        _reply_upload(frame, Status::bad_arg);
         return;
     }
     auto offset = get_u32(frame.payload);
@@ -349,27 +361,27 @@ void Service::_upload_data(const Link::Frame& frame)
     auto length = frame.size - 4;
 
     if (offset != _offset) {
-        _reply(frame, Status::bad_offset);
+        _reply_upload(frame, Status::bad_offset);
         return;
     }
     if (length == 0 || length > kMaxChunk || (uint64_t)_offset + length > _size) {
-        _reply(frame, Status::bad_arg);
+        _reply_upload(frame, Status::bad_arg);
         return;
     }
     // Keeps the file position sector-aligned, so FatFS writes straight from the
     // (word-aligned) payload; the SD DMA can't handle unaligned addresses.
     if (length % Card::kSectorSize != 0 && _offset + length != _size) {
-        _reply(frame, Status::bad_arg);
+        _reply_upload(frame, Status::bad_arg);
         return;
     }
     if (!_card->write(data, length)) {
         _reset_session();
-        _reply(frame, Status::io);
+        _reply_upload(frame, Status::io);
         return;
     }
     _crc = crc32_update(_crc, data, length);
     _offset += length;
-    _reply(frame, Status::ok);
+    _reply_upload(frame, Status::ok);
 }
 
 Status Service::_validate_upload()

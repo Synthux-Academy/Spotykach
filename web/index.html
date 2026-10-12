@@ -250,7 +250,7 @@ class Link {
       const frame = this.rx.slice(0, 12 + len);
       this.rx = this.rx.slice(12 + len);
       const crc = crc32(frame.subarray(12), crc32(frame.subarray(2, 8)));
-      if (crc !== dv.getUint32(8, true)) { this.fail(new DeviceError(1)); continue; }
+      if (crc !== dv.getUint32(8, true)) { this.fail(new DeviceError(1, "A reply from Spotykach arrived corrupted. Please retry.")); continue; }
       this.deliver(frame[2], frame[3], frame.subarray(12));
     }
   }
@@ -258,7 +258,7 @@ class Link {
   deliver(type, seq, payload) {
     const p = this.pending;
     if (!p) return;
-    if (type === 0x80) { this.fail(new DeviceError(payload[0] ?? 1)); return; }
+    if (type === 0x80) { this.fail(new DeviceError(payload[0] ?? 1, "Spotykach received a corrupted request. Please retry.")); return; }
     if (type !== (p.type | 0x80) || seq !== p.seq) return; // stale response
     this.pending = null;
     clearInterval(p.timer);
@@ -330,9 +330,16 @@ class Link {
       }, 50);
       this.pending = { type, seq: this.seq, resolve, reject, timer };
     });
+    // The device can reject a frame before the write finishes, keep that from
+    // surfacing as an unhandled rejection; it's awaited right below.
+    response.catch(() => {});
     await this.writer.write(frame);
     const reply = await response;
-    if (reply[0] !== 0) throw new DeviceError(reply[0]);
+    if (reply[0] !== 0) {
+      const e = new DeviceError(reply[0]);
+      e.reply = reply;
+      throw e;
+    }
     return reply;
   }
 }
@@ -380,6 +387,39 @@ async function list(link) {
   return slots;
 }
 
+const kMaxUploadRetries = 5;
+
+/*
+A chunk is resent after a corrupted frame or a lost reply. The device only advances
+after writing a chunk and reports its offset with every UPLOAD_DATA reply, so a
+BAD_OFFSET on a resend tells whether the chunk had already been written.
+*/
+async function sendChunk(link, payload, offset, length) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      // Well below the device's 10 s idle timeout, so a lost reply can be retried
+      await link.request(CMD.uploadData, payload, 4000);
+      return;
+    } catch (e) {
+      const deviceOffset = e.reply && e.reply.length >= 8 ? new DataView(e.reply.buffer, e.reply.byteOffset).getUint32(4, true) : -1;
+      if (attempt > 1 && e instanceof DeviceError && e.status === 10 && deviceOffset === offset + length) return; // written, reply was lost
+      const retriable = e instanceof TimeoutError
+        || (e instanceof DeviceError && e.status === 1)
+        || (attempt > 1 && e instanceof DeviceError && e.status === 10 && deviceOffset === offset);
+      const detail = `upload at byte ${offset}, attempt ${attempt}: ${e.detail || e.message}`;
+      console.warn(detail);
+      if (!retriable || link.closed || attempt > kMaxUploadRetries) {
+        e.message += ` (${detail})`;
+        throw e;
+      }
+      // Let the device drop the rest of a broken frame (it waits for 100 ms of quiet),
+      // then forget anything that arrived for the failed attempt.
+      await sleep(250);
+      link.resync();
+    }
+  }
+}
+
 async function upload(link, tape, slot, bytes, maxChunk, onProgress) {
   const begin = new Uint8Array(12);
   const dv = new DataView(begin.buffer);
@@ -393,7 +433,7 @@ async function upload(link, tape, slot, bytes, maxChunk, onProgress) {
       const payload = new Uint8Array(4 + chunk.length);
       new DataView(payload.buffer).setUint32(0, offset, true);
       payload.set(chunk, 4);
-      await link.request(CMD.uploadData, payload, 10000);
+      await sendChunk(link, payload, offset, chunk.length);
       onProgress((offset + chunk.length) / bytes.length);
     }
     onProgress(1, "Verifying…");

@@ -109,7 +109,12 @@ If the page gets no reply within 3 s, it reports "device did not respond (old fi
 - `MAX_CHUNK` = 32768 (= `Card::kChunk`). `MAX_PAYLOAD` = `MAX_CHUNK` + 16.
 - The header is 12 bytes, and data-bearing payloads start with a 4-byte field. Data therefore starts at frame offset 16 and stays 4-byte aligned for SD DMA.
 - Every response payload begins with `status: u8` (§5.4).
-- **Frame errors** are bad magic, `len > MAX_PAYLOAD`, a CRC mismatch, or a partial frame older than 500 ms. On any of these, the device drops its RX buffer and replies `BAD_FRAME` with `type = 0x80`. That is the response type of command `0x00`, which is reserved for this purpose; `0xFF` can't be used because it is the response to `EXIT` (`0x7F`). The host aborts the current operation; nothing is retried automatically. Bytes that arrive before a magic are discarded, which covers modem probing on Linux.
+- **Frame errors** are bad magic, `len > MAX_PAYLOAD`, a CRC mismatch, or a partial frame that has received nothing for 2 s. On any of these, the device:
+  - drops its RX buffer, then discards incoming bytes until the line has been quiet for 100 ms, so the rest of a broken frame isn't taken for a new one;
+  - replies `BAD_FRAME` with `type = 0x80`. That is the response type of command `0x00`, which is reserved for this purpose; `0xFF` can't be used because it is the response to `EXIT` (`0x7F`);
+  - keeps the session (upload or download) as it was, because the broken frame was never processed.
+
+  The host may resend the request after waiting at least the quiet time (§5.5). Bytes that arrive before a magic are discarded, which covers modem probing on Linux.
 
 ### 5.3 Commands
 
@@ -122,7 +127,7 @@ If the page gets no reply within 3 s, it reports "device did not respond (old fi
 | `0x02` | PING | — | — | any |
 | `0x03` | LIST | — | see below | idle |
 | `0x10` | UPLOAD_BEGIN | `tape u8, slot u8, rsv u16, size u32, crc32 u32` | — | idle |
-| `0x11` | UPLOAD_DATA | `offset u32, data[≤MAX_CHUNK]` | — | uploading |
+| `0x11` | UPLOAD_DATA | `offset u32, data[≤MAX_CHUNK]` | `rsv u8×3, offset u32` (the device's offset after handling the request, for any status) | uploading |
 | `0x12` | UPLOAD_COMMIT | — | — | uploading |
 | `0x13` | UPLOAD_ABORT | — | — | any |
 | `0x20` | DOWNLOAD_OPEN | `tape u8, slot u8, rsv u16` | `rsv u8×3, size u32` | idle |
@@ -191,6 +196,10 @@ The duration shown is `frames / sample_rate`.
    - creates `/SK` and `/SK/<T>` if missing;
    - opens `/SK/<T>/<N>.tmp` with `FA_CREATE_ALWAYS`.
 2. `UPLOAD_DATA` with sequential offsets. The device writes each payload with `f_write` and updates a running CRC-32. Every chunk except the last must be a multiple of 512 bytes; otherwise the device replies `BAD_ARG`. This keeps the file position sector-aligned so FatFS writes straight from the word-aligned payload (see SD DMA alignment, §10.1).
+
+   **Retries.** A chunk is resent, up to 5 times, after `BAD_FRAME` (from the device, or a reply that fails the host's CRC check) or after no reply within 4 s. The 4 s limit is well below the device's 10 s idle timeout. Before resending, the host waits 250 ms and clears its receive buffer. The device only advances after writing a chunk, and every `UPLOAD_DATA` reply carries its offset. So on a resend:
+   - `BAD_OFFSET` with offset = chunk end means the chunk was already written and only the reply was lost, so the host continues;
+   - `BAD_OFFSET` with offset = chunk start means it wasn't written, so the host resends.
 3. `UPLOAD_COMMIT`. The device:
    - checks that the received size equals the declared size and the CRC matches;
    - runs `f_close`;

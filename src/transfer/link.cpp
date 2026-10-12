@@ -11,7 +11,10 @@ extern "C" {
     extern USBD_HandleTypeDef hUsbDeviceHS;
 }
 
-static constexpr uint32_t kStaleFrameMs = 500;
+static constexpr uint32_t kStaleFrameMs = 2000;
+// After a frame error, incoming bytes are discarded until the line is quiet
+// this long, so the rest of a broken frame isn't taken for a new one.
+static constexpr uint32_t kQuietMs = 100;
 static constexpr uint32_t kTxTimeoutMs = 200;
 
 static uint8_t DSY_SDRAM_BSS __attribute__((aligned(32))) _rx_buf[kMaxFrame];
@@ -21,6 +24,22 @@ static volatile size_t   _rx_len = 0;
 static volatile bool     _rx_overflow = false;
 static volatile uint32_t _rx_last_ms = 0;
 static size_t            _frame_size = 0;
+static bool              _discarding = false;
+
+static void clear_rx()
+{
+    __disable_irq();
+    _rx_len = 0;
+    _rx_overflow = false;
+    __enable_irq();
+}
+
+static Link::Poll frame_error()
+{
+    clear_rx();
+    _discarding = true;
+    return Link::Poll::error;
+}
 
 // Called from the USB interrupt
 static void rx_callback(uint8_t* buf, uint32_t* len)
@@ -59,6 +78,7 @@ void Link::start()
     _rx_overflow = false;
     __enable_irq();
     _frame_size = 0;
+    _discarding = false;
     _rx_last_ms = System::GetNow();
 
     UsbHandle usb;
@@ -102,13 +122,13 @@ Link::Poll Link::poll(Frame& out)
         _frame_size = 0;
     }
 
-    if (_rx_overflow) {
-        __disable_irq();
-        _rx_len = 0;
-        _rx_overflow = false;
-        __enable_irq();
-        return Poll::error;
+    if (_discarding) {
+        clear_rx();
+        if (System::GetNow() - _rx_last_ms < kQuietMs) return Poll::none;
+        _discarding = false;
     }
+
+    if (_rx_overflow) return frame_error();
 
     size_t len = _rx_len;
     if (len == 0) return Poll::none;
@@ -124,30 +144,26 @@ Link::Poll Link::poll(Frame& out)
     auto is_stale = System::GetNow() - _rx_last_ms > kStaleFrameMs;
     if (len < kHeaderSize) {
         if (is_stale) {
-            _drop(len);
-            return Poll::error;
+            return frame_error();
         }
         return Poll::none;
     }
 
     auto payload_size = get_u32(&_rx_buf[4]);
     if (payload_size > kMaxPayload) {
-        _drop(len);
-        return Poll::error;
+        return frame_error();
     }
 
     if (len < kHeaderSize + payload_size) {
         if (is_stale) {
-            _drop(len);
-            return Poll::error;
+            return frame_error();
         }
         return Poll::none;
     }
 
     auto crc = crc32_update(crc32(&_rx_buf[2], 6), &_rx_buf[kHeaderSize], payload_size);
     if (crc != get_u32(&_rx_buf[8])) {
-        _drop(len);
-        return Poll::error;
+        return frame_error();
     }
 
     out.type = _rx_buf[2];

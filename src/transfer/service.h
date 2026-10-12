@@ -53,6 +53,7 @@ class Service {
     size_t _list_entry(const uint8_t tape, const uint8_t slot, uint8_t* out);
     Status _validate_upload();
     void _reply(const Link::Frame&, const Status);
+    void _reply_upload(const Link::Frame&, const Status);
     bool _slot_args(const Link::Frame&, uint8_t& tape, uint8_t& slot);
 
     Card*    _card;
