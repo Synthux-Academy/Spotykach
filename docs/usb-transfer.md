@@ -292,17 +292,19 @@ No libDaisy changes were needed:
 - **`service`:** the session state machine (`idle`, `uploading`, `downloading`), the command handlers (§5.3), and the 10 s inactivity timer. It runs from the main loop. Each command finishes within one `process()` call; at most 32 KB of SD I/O happens per call.
 
 ### 7.5 App, storage, UI, MIDI
-- `CoreMIDI::_process_event`: handle `SystemExclusive` from USB MIDI only and pass matching messages to an `on_transfer_request` callback.
-- `Storage`:
-  - `can_enter_transfer()`: preload done, and no deck loading or saving;
-  - `enter_transfer()`: deactivate decks, mount, set `Card::State::transfer`, clean up temp files;
-  - `exit_transfer()`.
-- `AppImpl`:
-  - add a `Mode { normal, transfer }`;
-  - in `transfer`, `Loop()` runs `transfer.process()` and a pad check every 20 ms (`CoreUI::process_transfer`) instead of `_ui.process()` and `_storage.process()`;
-  - `ProcessAudio` writes silence;
-  - `T5Callback` renders the transfer LED pattern: a steady colour in idle and the progress of the current upload or download on the ring. The exact pattern is decided during implementation.
-- `Hardware`: owns a `daisy::UsbHandle` for CDC next to `midi_usb`. `#ifndef DEBUG` guards match the existing MIDI ones.
+- **`USBTransfer`** (`src/transfer/usb.transfer.*`) runs the mode switch. `AppImpl` owns it and constructs it with references to `Hardware`, `Core`, `CoreUI` and `Storage`.
+  - `check_request()`, from the main loop in normal mode: enters transfer mode when the SysEx request arrived. It checks the preconditions (§3.1), replies, stops the decks, sets `is_active()`, switches USB MIDI off and starts the `transfer::Service`.
+  - `process()`, from the main loop while `is_active()`: runs the service, passes progress to the UI, checks the exit pads every 20 ms (`CoreUI::process_transfer`), and leaves when the host or the pads say so. Leaving stops the service, unmounts the card, switches USB MIDI back on and clears `is_active()`.
+- **`AppImpl`:**
+  - `Loop()` runs only `USBTransfer::process()` while transfer mode is active, instead of `_ui.process()` and `_storage.process()`;
+  - `ProcessAudio` writes silence and skips `CoreUI::tick` (USB MIDI) and `Core::process`;
+  - `T5Callback` skips gate input and `Core::prepare`.
+- **`CoreMIDI`:** handles `SystemExclusive` from USB MIDI only, sets the transfer request flag for a matching enter message, and sends the reply SysEx from its next `process()`.
+- **`CoreUI`:**
+  - `set_transfer()` switches the pads and LEDs to transfer mode. All pads except Play A/B are ignored, and the LEDs show the transfer pattern: both rings breathing while idle, the progress of the current upload or download (at 0.5 brightness) while busy, and the Play pads lit.
+  - `set_transfer_progress()` passes the progress for the rings.
+- **`Storage`:** `begin_transfer()` checks the preconditions, deactivates the decks, mounts the card and sets `Card::State::transfer`; `end_transfer()` undoes it.
+- **`Hardware`:** `StartUsbMidi()` / `StopUsbMidi()` on the rear port. CDC itself is started by `transfer::Link`. Transfer mode isn't available in `DEBUG` builds, where the port carries the logger.
 
 ### 7.6 Version
 - The firmware version is a constant in `src/core/config.h`, next to the other `static constexpr` values in `namespace spotykach`:
