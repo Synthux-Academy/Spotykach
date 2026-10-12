@@ -250,10 +250,10 @@ size_t Service::_list_entry(const uint8_t tape, const uint8_t slot, uint8_t* out
 
         auto cue_count = info.cue_count;
         uint64_t data_end = (uint64_t)info.data_offset + info.data_size + (info.data_size % 2);
-        if (data_end < file_size
-            && _card->seek(data_end)
-            && _card->read(buf, kListTailRead, got)) {
-            cue_count = std::max(cue_count, wav_cue_count(buf, got));
+        uint8_t* tail;
+        size_t tail_size;
+        if (data_end < file_size && _card->read_at(data_end, tail, tail_size)) {
+            cue_count = std::max(cue_count, wav_cue_count(tail, tail_size));
         }
 
         put_u32(&out[8], info.block_align ? info.data_size / info.block_align : 0);
@@ -353,6 +353,12 @@ void Service::_upload_data(const Link::Frame& frame)
         return;
     }
     if (length == 0 || length > kMaxChunk || (uint64_t)_offset + length > _size) {
+        _reply(frame, Status::bad_arg);
+        return;
+    }
+    // Keeps the file position sector-aligned, so FatFS writes straight from the
+    // (word-aligned) payload; the SD DMA can't handle unaligned addresses.
+    if (length % Card::kSectorSize != 0 && _offset + length != _size) {
         _reply(frame, Status::bad_arg);
         return;
     }
@@ -460,16 +466,17 @@ void Service::_download_read(const Link::Frame& frame)
         _reply(frame, Status::bad_offset);
         return;
     }
-
-    if (offset != _card->tell() && !_card->seek(offset)) {
-        _reset_session();
-        _reply(frame, Status::io);
+    // Sector-aligned position: FatFS reads straight into the (word-aligned)
+    // payload, the SD DMA can't handle unaligned addresses.
+    if (offset % Card::kSectorSize != 0) {
+        _reply(frame, Status::bad_arg);
         return;
     }
 
     auto p = _link.payload();
     size_t got = 0;
-    if (!_card->read(&p[4], length, got) || got != length) {
+    if ((offset != _card->tell() && !_card->seek(offset)) || !_card->read(&p[4], length, got)) got = 0;
+    if (got != length) {
         _reset_session();
         _reply(frame, Status::io);
         return;

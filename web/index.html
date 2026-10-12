@@ -527,9 +527,10 @@ function encodeWav(left, right, cues, nameBytes) {
   const frames = left.length;
   const dataSize = frames * 8;
   const fmtSize = 8 + 16;
-  const inamSize = nameBytes.length ? nameBytes.length + 1 : 0;
-  const inamPadded = inamSize + (inamSize % 2);
-  const listSize = inamSize ? 8 + 4 + 8 + inamPadded : 0;
+  // The name is NUL-padded to a multiple of 4 so the audio starts 4-byte aligned
+  // (header = 64 + INAM size). The device's SD DMA needs aligned reads.
+  const inamSize = nameBytes.length ? (nameBytes.length + 1 + 3) & ~3 : 0;
+  const listSize = inamSize ? 8 + 4 + 8 + inamSize : 0;
   const cueSize = cues.length ? 8 + 4 + cues.length * 24 : 0;
   const total = 12 + fmtSize + listSize + 8 + dataSize + cueSize;
 

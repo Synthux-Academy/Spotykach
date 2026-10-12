@@ -190,7 +190,7 @@ The duration shown is `frames / sample_rate`.
    - checks the size limit and free space (the temp file and the old file exist side by side);
    - creates `/SK` and `/SK/<T>` if missing;
    - opens `/SK/<T>/<N>.tmp` with `FA_CREATE_ALWAYS`.
-2. `UPLOAD_DATA` with sequential offsets. The device writes each payload with `f_write` and updates a running CRC-32.
+2. `UPLOAD_DATA` with sequential offsets. The device writes each payload with `f_write` and updates a running CRC-32. Every chunk except the last must be a multiple of 512 bytes; otherwise the device replies `BAD_ARG`. This keeps the file position sector-aligned so FatFS writes straight from the word-aligned payload (see SD DMA alignment, §10.1).
 3. `UPLOAD_COMMIT`. The device:
    - checks that the received size equals the declared size and the CRC matches;
    - runs `f_close`;
@@ -201,7 +201,7 @@ The duration shown is `frames / sample_rate`.
 
 The whole-file CRC is checked against the bytes as received. The file is not read back from the card; a read-back would roughly double the upload time.
 
-**Download:** `DOWNLOAD_OPEN` → `DOWNLOAD_READ` until `size` bytes have arrived → `DOWNLOAD_CLOSE`. The frame CRC protects every chunk. The host saves the bytes unchanged.
+**Download:** `DOWNLOAD_OPEN` → `DOWNLOAD_READ` until `size` bytes have arrived → `DOWNLOAD_CLOSE`. `DOWNLOAD_READ` offsets must be multiples of 512; otherwise the device replies `BAD_ARG`. The page's read sizes are powers of two of at least 1 KiB, so its offsets always are. The frame CRC protects every chunk. The host saves the bytes unchanged.
 
 On macOS the serial tty can drop the tail of a large device-to-host burst when Chrome doesn't drain it fast enough. Uploads aren't affected. `DOWNLOAD_READ` names an absolute offset and length, so the host recovers without any firmware help:
 - **Loss detection.** A reply counts as lost when it stops arriving for 300 ms partway through, or doesn't start within 1.5 s.
@@ -226,7 +226,7 @@ The browser console logs every lost reply and the read size the download finishe
 Chunk order: `RIFF/WAVE`, `fmt `, `LIST`, `data`, `cue `.
 
 - **`fmt `**, 16 bytes: `AudioFormat=3`, `NbrChannels=2`, `SampleRate=48000`, `BytePerSec=384000`, `BytePerBloc=8`, `BitsPerSample=32`. This is the same layout the device writes in `wav_header(size)`.
-- **`LIST`** of type `INFO` holding one `INAM` sub-chunk: the original file name in UTF-8, including its extension, at most 64 bytes (cut at a UTF-8 character boundary), NUL-terminated and padded to even length. It is left out if the name is empty. It sits before `data`, so a single 32 KB header read gives the listing.
+- **`LIST`** of type `INFO` holding one `INAM` sub-chunk: the original file name in UTF-8, including its extension, at most 64 bytes (cut at a UTF-8 character boundary), NUL-terminated and NUL-padded to a multiple of 4 bytes. The header before the audio is 64 bytes plus the `INAM` size, so the audio always starts 4-byte aligned (see SD DMA alignment, §10.1). The device strips the trailing NULs when it reads the name. It is left out if the name is empty. It sits before `data`, so a single 32 KB header read gives the listing.
 - **`data`**: interleaved float32 L/R, at most `max_frames` frames.
 - **`cue `**: written only if there are cue points. It holds `dwCuePoints` followed by one 24-byte entry per point (`dwName`=index+1, `dwPosition`=offset, `fccChunk='data'`, `dwChunkStart=0`, `dwBlockStart=0`, `dwSampleOffset`=offset in frames). It goes after `data`, the place the device already reads cues from in `Card::read_audio()` and where most DAWs write them.
 
@@ -354,6 +354,17 @@ Location: `web/index.html`, a single file of plain HTML/JS/CSS with no dependenc
 ## 10. Known issues
 
 ### 10.1 Fixed together with this feature
+SD DMA alignment (shifted audio, engine muted until power cycle):
+- libDaisy's `SD_read`/`SD_write` hand the destination address straight to the SDMMC DMA, which needs it word-aligned. When FatFS reads from a file position that isn't sector-aligned, it copies the head of the partial sector and then reads whole sectors directly to `buffer + head`.
+- A WAV whose audio starts at 2 mod 4 was therefore loaded shifted by 2 bytes. The web encoder produced such files whenever the padded `INAM` length was 2 mod 4 (e.g. `kick.wav` put the audio at byte 74). Files from other sources could hit it too.
+- The resulting NaNs latched the DSP until power-off. The cue chunk after `data` had the same problem.
+- **Fixes:**
+  - `Card` reads audio and the cue tail from the sector boundary below the wanted position into its aligned buffer and skips the head (`Card::_read_from`, public `read_at`). The slot listing's cue read uses it too.
+  - While loading, samples whose exponent bits are all ones (NaN/Inf) are replaced with 0. This is a bit test, because `-ffast-math` makes `std::isfinite` always true.
+  - The web encoder pads `INAM` to a multiple of 4 (§6.1).
+  - `UPLOAD_DATA` chunk sizes and `DOWNLOAD_READ` offsets must be multiples of 512 (§5.5).
+- Files already on the card load correctly with the new firmware; there's no need to upload them again.
+
 Path buffers (stack overflow on every load):
 - `Card::init_read_audio` used `char audio_path[11]` for `"/SK/G/1.wav"`, which needs 12 bytes.
 - `Card::init_write_audio` used `char tape_dir_path[4]` for `"SK/G"`, which needs 5 bytes.

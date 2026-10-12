@@ -58,16 +58,54 @@ void Card::init_read_audio(AudioData data)
             _hdr_size = hdr_size;
             _data_size = hdr.DataSize + (hdr.DataSize % 2); // Chunks are word-aligned
             _audio_size = std::min(data.body_size, (size_t)hdr.DataSize);
+            _scrubbed = 0;
             _state = State::read_audio;        
     }
     else {
         _state = State::failed;
         _close_file();      
     }
-    if (f_lseek(&_sdfile, hdr_size) != FR_OK) {
-        _state = State::failed;
-        _close_file();
+}
+
+/*
+The SD driver hands the destination address straight to the SDMMC DMA, which
+needs it word-aligned. FatFS reads whole sectors directly into the destination
+after copying the head of a partial sector, so reading from a position that
+isn't 4-byte aligned shifts the data. Reading from the sector boundary below
+pos into the aligned buffer and skipping the head avoids that.
+*/
+bool Card::_read_from(const uint32_t pos, uint8_t*& out_data, size_t& out_size, bool& out_eof)
+{
+    auto aligned = pos & ~(uint32_t)(kSectorSize - 1);
+    auto skip = pos - aligned;
+    UINT bytesread = 0;
+    if (f_lseek(&_sdfile, aligned) != FR_OK || f_read(&_sdfile, _buffer, kChunk, &bytesread) != FR_OK) {
+        return false;
     }
+    out_data = _buffer + std::min((size_t)skip, (size_t)bytesread);
+    out_size = bytesread > skip ? bytesread - skip : 0;
+    out_eof = bytesread < kChunk;
+    return true;
+}
+
+bool Card::read_at(const uint32_t pos, uint8_t*& out_data, size_t& out_size)
+{
+    if (!_is_file_open) return false;
+    bool eof;
+    return _read_from(pos, out_data, out_size, eof);
+}
+
+/* Non-finite samples (corrupt file) would latch the DSP into NaN, replace them with silence */
+void Card::_scrub_audio()
+{
+    auto end = _offset & ~(size_t)3;
+    for (auto i = _scrubbed; i < end; i += 4) {
+        uint32_t bits;
+        std::memcpy(&bits, &_bytes[i], 4);
+        // Exponent all ones: Inf or NaN. Bit test, -ffast-math makes std::isfinite() always true.
+        if ((bits & 0x7F800000u) == 0x7F800000u) std::memset(&_bytes[i], 0, 4);
+    }
+    _scrubbed = end;
 }
 
 void Card::read_audio()
@@ -76,30 +114,32 @@ void Card::read_audio()
         return;
     }
     
-    size_t bytesread;
-    if (f_read(&_sdfile, _buffer, kChunk, (UINT* )&bytesread) != FR_OK) {
+    uint8_t* data;
+    size_t size;
+    bool eof;
+    if (!_read_from(_hdr_size + _offset, data, size, eof)) {
         _state = State::failed;
         _close_file();
         return;
     }
 
-    auto buf_len = std::min(_audio_size - _offset, bytesread);
-    std::memcpy(&_bytes[_offset], _buffer, buf_len);
+    auto buf_len = std::min(_audio_size - _offset, size);
+    std::memcpy(&_bytes[_offset], data, buf_len);
     
     _offset += buf_len;
     _size_read_audio = _offset * .125f; // 1 / (2 channels * 4 bytes)
+    _scrub_audio();
 
-    if (bytesread < kChunk || buf_len < bytesread) {
+    if (eof || buf_len < size || _offset >= _audio_size) {
         /* Chunks after "data" (cue points) start at the end of the whole
         data chunk, which can be past the part that fit into the buffer. */
-        if (f_lseek(&_sdfile, _hdr_size + _data_size) == FR_OK 
-         && f_read(&_sdfile, _buffer, kChunk, (UINT* )&bytesread) == FR_OK) {
+        if (_read_from(_hdr_size + _data_size, data, size, eof)) {
             find_cue_points(
-                _buffer,
+                data,
                 _slices,
                 _slice_count,
                 _size_read_audio,
-                bytesread
+                size
             );
         }
         auto count = *_slice_count;
