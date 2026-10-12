@@ -70,7 +70,9 @@ void Service::process()
         case Link::Poll::error:
             // The broken frame wasn't processed, the session stays as it was
             // so the host can resend it.
-            _link.send_status(kFrameErrorType, 0, Status::bad_frame);
+            _link.payload()[0] = static_cast<uint8_t>(Status::bad_frame);
+            _link.payload()[1] = static_cast<uint8_t>(_link.last_error());
+            _link.send(kFrameErrorType, 0, 2);
             break;
         case Link::Poll::frame:
             _last_frame_ms = daisy::System::GetNow();

@@ -1,0 +1,39 @@
+name: Publish @synthux/spotykach-transfer
+
+# Push a tag spotykach-transfer-v<version> matching web/spotykach-transfer/package.json.
+# Needs the NPM_TOKEN secret: an npm automation token with publish rights on @synthux.
+on:
+  push:
+    tags:
+      - spotykach-transfer-v*
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  test:
+    uses: ./.github/workflows/transfer-tests.yml
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/spotykach-transfer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Check the tag matches package.json
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "$GITHUB_REF_NAME" != "spotykach-transfer-v$version" ]; then
+            echo "Tag $GITHUB_REF_NAME doesn't match package.json version $version" >&2
+            exit 1
+          fi
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

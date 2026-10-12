@@ -44,11 +44,16 @@ class Link {
     bool send_status(const uint8_t type, const uint8_t seq, const Status);
 
     uint32_t last_rx_ms() const;
+    /* Why the last Poll::error happened */
+    FrameError last_error() const { return _last_error; }
 
   private:
     NOCOPY(Link)
 
     void _drop(const size_t count);
+    Poll _frame_error(const FrameError);
+
+    FrameError _last_error = FrameError::unknown;
     bool _wait_tx_idle(const uint32_t timeout_ms);
 };
 

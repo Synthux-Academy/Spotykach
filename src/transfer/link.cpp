@@ -34,12 +34,7 @@ static void clear_rx()
     __enable_irq();
 }
 
-static Link::Poll frame_error()
-{
-    clear_rx();
-    _discarding = true;
-    return Link::Poll::error;
-}
+
 
 // Called from the USB interrupt
 static void rx_callback(uint8_t* buf, uint32_t* len)
@@ -100,6 +95,14 @@ uint32_t Link::last_rx_ms() const
     return _rx_last_ms;
 }
 
+Link::Poll Link::_frame_error(const FrameError error)
+{
+    clear_rx();
+    _discarding = true;
+    _last_error = error;
+    return Poll::error;
+}
+
 void Link::_drop(const size_t count)
 {
     __disable_irq();
@@ -128,7 +131,7 @@ Link::Poll Link::poll(Frame& out)
         _discarding = false;
     }
 
-    if (_rx_overflow) return frame_error();
+    if (_rx_overflow) return _frame_error(FrameError::overflow);
 
     size_t len = _rx_len;
     if (len == 0) return Poll::none;
@@ -144,26 +147,26 @@ Link::Poll Link::poll(Frame& out)
     auto is_stale = System::GetNow() - _rx_last_ms > kStaleFrameMs;
     if (len < kHeaderSize) {
         if (is_stale) {
-            return frame_error();
+            return _frame_error(FrameError::stale);
         }
         return Poll::none;
     }
 
     auto payload_size = get_u32(&_rx_buf[4]);
     if (payload_size > kMaxPayload) {
-        return frame_error();
+        return _frame_error(FrameError::bad_length);
     }
 
     if (len < kHeaderSize + payload_size) {
         if (is_stale) {
-            return frame_error();
+            return _frame_error(FrameError::stale);
         }
         return Poll::none;
     }
 
     auto crc = crc32_update(crc32(&_rx_buf[2], 6), &_rx_buf[kHeaderSize], payload_size);
     if (crc != get_u32(&_rx_buf[8])) {
-        return frame_error();
+        return _frame_error(FrameError::crc);
     }
 
     out.type = _rx_buf[2];

@@ -143,37 +143,21 @@
 </main>
 
 <script>
-"use strict";
+// ES modules don't load from file:// pages, so the module below wouldn't run
+if (location.protocol === "file:") {
+  document.getElementById("connect").disabled = true;
+  document.getElementById("error-text").textContent =
+    "Open this page through a web server, browsers don't load its script from a file. "
+    + "In the repository run: python3 -m http.server -d web 8000, then open http://localhost:8000";
+  document.getElementById("error").classList.remove("hidden");
+}
+</script>
+<script type="module">
+import {
+  connect as connectDevice, authorizePort, isSupported,
+  NeedsAuthorizationError, convertAudio, SLOT_OCCUPIED, SLOT_LOADABLE,
+} from "./spotykach-transfer/index.js";
 
-// Protocol (docs/usb-transfer.md) /////////////////////////////////////////////
-const VID = 0x0483, PID = 0x5740;
-const PROTO_MAJOR = 1;
-const SYSEX_ENTER = [0xF0, 0x7D, 0x53, 0x4B, 0x01, 0xF7];
-const CMD = {
-  hello: 0x01, ping: 0x02, list: 0x03,
-  uploadBegin: 0x10, uploadData: 0x11, uploadCommit: 0x12, uploadAbort: 0x13,
-  downloadOpen: 0x20, downloadRead: 0x21, downloadClose: 0x22,
-  remove: 0x30, exit: 0x7F,
-};
-const STATUS_TEXT = [
-  "OK",
-  "Transfer error (corrupted frame). Please retry.",
-  "The device doesn't know this command. Update the firmware.",
-  "The device is busy with another operation.",
-  "Invalid request.",
-  "SD card not available. Check the card and reconnect.",
-  "SD card read/write error.",
-  "The slot is empty.",
-  "Not enough free space on the SD card.",
-  "File is too large.",
-  "Transfer got out of sync. Please retry.",
-  "Upload was corrupted (checksum mismatch). Please retry.",
-  "The device rejected the file format.",
-];
-const ENTER_TEXT = {
-  1: "Spotykach is busy (loading, saving or recording). Finish that and try again.",
-  2: "No SD card found in Spotykach.",
-};
 const TAPES = [
   { letter: "B", name: "Blue", color: "#3a5cff" },
   { letter: "G", name: "Green", color: "#2fbf4a" },
@@ -183,475 +167,6 @@ const TAPES = [
   { letter: "Y", name: "Yellow", color: "#ffd21f" },
 ];
 
-class DeviceError extends Error {
-  constructor(status, message) { super(message || STATUS_TEXT[status] || `Device error ${status}`); this.status = status; }
-}
-class TimeoutError extends Error {
-  constructor(detail) { super("Spotykach didn't respond in time."); this.detail = detail; }
-}
-
-const CRC_TABLE = (() => {
-  const t = new Uint32Array(256);
-  for (let i = 0; i < 256; i++) {
-    let c = i;
-    for (let k = 0; k < 8; k++) c = (c & 1) ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
-    t[i] = c >>> 0;
-  }
-  return t;
-})();
-function crc32(data, crc = 0) {
-  crc = ~crc >>> 0;
-  for (let i = 0; i < data.length; i++) crc = CRC_TABLE[(crc ^ data[i]) & 0xff] ^ (crc >>> 8);
-  return ~crc >>> 0;
-}
-
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-
-class Link {
-  constructor(port) {
-    this.port = port;
-    this.rx = new Uint8Array(0);
-    this.seq = 0;
-    this.pending = null;
-    this.lock = Promise.resolve();
-    this.closed = false;
-    this.onclose = null;
-  }
-
-  async open() {
-    await this.port.open({ baudRate: 115200, bufferSize: 65536 });
-    this.writer = this.port.writable.getWriter();
-    this.reader = this.port.readable.getReader();
-    this.readLoop();
-  }
-
-  async readLoop() {
-    try {
-      while (true) {
-        const { value, done } = await this.reader.read();
-        if (done) break;
-        if (value && value.length) this.append(value);
-      }
-    } catch (e) { /* device went away */ }
-    this.shutdown(new Error("Connection to Spotykach lost."));
-  }
-
-  append(bytes) {
-    this.lastRxMs = performance.now();
-    const merged = new Uint8Array(this.rx.length + bytes.length);
-    merged.set(this.rx); merged.set(bytes, this.rx.length);
-    this.rx = merged;
-    while (this.rx.length >= 12) {
-      if (this.rx[0] !== 0x53 || this.rx[1] !== 0x4B) { this.rx = this.rx.subarray(1); continue; }
-      const dv = new DataView(this.rx.buffer, this.rx.byteOffset);
-      const len = dv.getUint32(4, true);
-      if (len > 65536) { this.rx = this.rx.subarray(1); continue; }
-      if (this.rx.length < 12 + len) break;
-      const frame = this.rx.slice(0, 12 + len);
-      this.rx = this.rx.slice(12 + len);
-      const crc = crc32(frame.subarray(12), crc32(frame.subarray(2, 8)));
-      if (crc !== dv.getUint32(8, true)) { this.fail(new DeviceError(1, "A reply from Spotykach arrived corrupted. Please retry.")); continue; }
-      this.deliver(frame[2], frame[3], frame.subarray(12));
-    }
-  }
-
-  deliver(type, seq, payload) {
-    const p = this.pending;
-    if (!p) return;
-    if (type === 0x80) { this.fail(new DeviceError(payload[0] ?? 1, "Spotykach received a corrupted request. Please retry.")); return; }
-    if (type !== (p.type | 0x80) || seq !== p.seq) return; // stale response
-    this.pending = null;
-    clearInterval(p.timer);
-    p.resolve(payload);
-  }
-
-  /* What had arrived when a request timed out: tells a silent device apart from bytes lost on the way */
-  rxState() {
-    const rx = this.rx;
-    if (rx.length < 12) return `${rx.length} bytes pending`;
-    const dv = new DataView(rx.buffer, rx.byteOffset);
-    const magic = rx[0] === 0x53 && rx[1] === 0x4B;
-    return `${rx.length} of ${12 + dv.getUint32(4, true)} bytes of a ${magic ? "" : "misaligned "}frame type 0x${rx[2].toString(16)} seq ${rx[3]} pending`;
-  }
-
-  /* Drops partially received data, e.g. before retrying a request */
-  resync() { this.rx = new Uint8Array(0); }
-
-  fail(error) {
-    const p = this.pending;
-    if (!p) return;
-    this.pending = null;
-    clearInterval(p.timer);
-    p.reject(error);
-  }
-
-  shutdown(error) {
-    if (this.closed) return;
-    this.closed = true;
-    this.fail(error);
-    if (this.onclose) this.onclose(error);
-  }
-
-  async close() {
-    this.closed = true;
-    try { await this.reader.cancel(); } catch (e) {}
-    try { this.reader.releaseLock(); } catch (e) {}
-    try { this.writer.releaseLock(); } catch (e) {}
-    try { await this.port.close(); } catch (e) {}
-  }
-
-  // Requests are strictly one at a time
-  /* stallMs: give up early once a reply has started arriving and then stops */
-  request(type, payload = new Uint8Array(0), timeout = 5000, stallMs = 0) {
-    const run = () => this._request(type, payload, timeout, stallMs);
-    const result = this.lock.then(run, run);
-    this.lock = result.catch(() => {});
-    return result;
-  }
-
-  async _request(type, payload, timeout, stallMs) {
-    if (this.closed) throw new Error("Not connected.");
-    this.seq = (this.seq + 1) & 0xff;
-    const frame = new Uint8Array(12 + payload.length);
-    const dv = new DataView(frame.buffer);
-    frame[0] = 0x53; frame[1] = 0x4B; frame[2] = type; frame[3] = this.seq;
-    dv.setUint32(4, payload.length, true);
-    frame.set(payload, 12);
-    dv.setUint32(8, crc32(payload, crc32(frame.subarray(2, 8))), true);
-    const response = new Promise((resolve, reject) => {
-      const seq = this.seq;
-      const start = performance.now();
-      const timer = setInterval(() => {
-        const now = performance.now();
-        const stalled = stallMs > 0 && this.rx.length > 0 && now - this.lastRxMs > stallMs;
-        if (stalled || now - start > timeout) {
-          this.fail(new TimeoutError(`request 0x${type.toString(16)} seq ${seq}: ${this.rxState()}`));
-        }
-      }, 50);
-      this.pending = { type, seq: this.seq, resolve, reject, timer };
-    });
-    // The device can reject a frame before the write finishes, keep that from
-    // surfacing as an unhandled rejection; it's awaited right below.
-    response.catch(() => {});
-    await this.writer.write(frame);
-    const reply = await response;
-    if (reply[0] !== 0) {
-      const e = new DeviceError(reply[0]);
-      e.reply = reply;
-      throw e;
-    }
-    return reply;
-  }
-}
-
-// Device commands ///////////////////////////////////////////////////////////
-function u8(...values) { return new Uint8Array(values); }
-function slotArgs(tape, slot) { return u8(tape, slot, 0, 0); }
-
-async function hello(link) {
-  const p = await link.request(CMD.hello);
-  const dv = new DataView(p.buffer, p.byteOffset, p.byteLength);
-  const fwLength = p[34];
-  return {
-    protoMajor: p[1], protoMinor: p[2],
-    tapes: p[3], slots: p[4],
-    tapeNames: new TextDecoder().decode(p.subarray(5, 11)),
-    maxChunk: dv.getUint32(14, true),
-    maxFrames: dv.getUint32(18, true),
-    maxCues: dv.getUint16(22, true),
-    totalKiB: dv.getUint32(26, true),
-    freeKiB: dv.getUint32(30, true),
-    firmware: new TextDecoder().decode(p.subarray(35, 35 + fwLength)),
-  };
-}
-
-async function list(link) {
-  const p = await link.request(CMD.list, undefined, 15000);
-  const dv = new DataView(p.buffer, p.byteOffset, p.byteLength);
-  const count = p[1];
-  const slots = [];
-  let o = 2;
-  for (let i = 0; i < count; i++) {
-    const nameLength = p[o + 3];
-    slots.push({
-      tape: p[o], slot: p[o + 1], flags: p[o + 2],
-      fileSize: dv.getUint32(o + 4, true),
-      frames: dv.getUint32(o + 8, true),
-      sampleRate: dv.getUint32(o + 12, true),
-      cues: dv.getUint16(o + 16, true),
-      channels: p[o + 18], bits: p[o + 19],
-      name: new TextDecoder().decode(p.subarray(o + 20, o + 20 + nameLength)),
-    });
-    o += 20 + nameLength;
-  }
-  return slots;
-}
-
-const kMaxUploadRetries = 5;
-
-/*
-A chunk is resent after a corrupted frame or a lost reply. The device only advances
-after writing a chunk and reports its offset with every UPLOAD_DATA reply, so a
-BAD_OFFSET on a resend tells whether the chunk had already been written.
-*/
-async function sendChunk(link, payload, offset, length) {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      // Well below the device's 10 s idle timeout, so a lost reply can be retried
-      await link.request(CMD.uploadData, payload, 4000);
-      return;
-    } catch (e) {
-      const deviceOffset = e.reply && e.reply.length >= 8 ? new DataView(e.reply.buffer, e.reply.byteOffset).getUint32(4, true) : -1;
-      if (attempt > 1 && e instanceof DeviceError && e.status === 10 && deviceOffset === offset + length) return; // written, reply was lost
-      const retriable = e instanceof TimeoutError
-        || (e instanceof DeviceError && e.status === 1)
-        || (attempt > 1 && e instanceof DeviceError && e.status === 10 && deviceOffset === offset);
-      const detail = `upload at byte ${offset}, attempt ${attempt}: ${e.detail || e.message}`;
-      console.warn(detail);
-      if (!retriable || link.closed || attempt > kMaxUploadRetries) {
-        e.message += ` (${detail})`;
-        throw e;
-      }
-      // Let the device drop the rest of a broken frame (it waits for 100 ms of quiet),
-      // then forget anything that arrived for the failed attempt.
-      await sleep(250);
-      link.resync();
-    }
-  }
-}
-
-async function upload(link, tape, slot, bytes, maxChunk, onProgress) {
-  const begin = new Uint8Array(12);
-  const dv = new DataView(begin.buffer);
-  begin.set(slotArgs(tape, slot));
-  dv.setUint32(4, bytes.length, true);
-  dv.setUint32(8, crc32(bytes), true);
-  await link.request(CMD.uploadBegin, begin, 10000);
-  try {
-    for (let offset = 0; offset < bytes.length; offset += maxChunk) {
-      const chunk = bytes.subarray(offset, Math.min(offset + maxChunk, bytes.length));
-      const payload = new Uint8Array(4 + chunk.length);
-      new DataView(payload.buffer).setUint32(0, offset, true);
-      payload.set(chunk, 4);
-      await sendChunk(link, payload, offset, chunk.length);
-      onProgress((offset + chunk.length) / bytes.length);
-    }
-    onProgress(1, "Verifying…");
-    await link.request(CMD.uploadCommit, undefined, 10000);
-  } catch (e) {
-    if (!link.closed) { try { await link.request(CMD.uploadAbort); } catch (_) {} }
-    throw e;
-  }
-}
-
-/*
-DOWNLOAD_READ asks for an absolute offset and length, so it can be repeated safely.
-On macOS the serial tty can drop bytes of large bursts when Chrome doesn't drain it
-fast enough, so the read size adapts: halve on a lost reply and stay below the size
-that failed; probe that size again only after a long run of clean reads.
-*/
-const kMinReadChunk = 1024;
-const kGrowAfter = 8;
-const kProbeAfter = 64;
-const kMaxFailuresInRow = 8;
-const kReadChunkKey = "spotykach.readChunk";
-
-/* The read size that worked last time on this computer, so a download doesn't start by losing replies */
-function loadReadChunk(maxChunk) {
-  try {
-    const saved = parseInt(localStorage.getItem(kReadChunkKey), 10);
-    if (saved >= kMinReadChunk) return Math.min(saved, maxChunk);
-  } catch (e) {}
-  return maxChunk;
-}
-function saveReadChunk(chunk) {
-  try { localStorage.setItem(kReadChunkKey, String(chunk)); } catch (e) {}
-}
-
-async function download(link, tape, slot, maxChunk, onProgress) {
-  const open = await link.request(CMD.downloadOpen, slotArgs(tape, slot));
-  const size = new DataView(open.buffer, open.byteOffset).getUint32(4, true);
-  const out = new Uint8Array(size);
-  let chunk = loadReadChunk(maxChunk);
-  let ceiling = chunk;      // largest read size not known to fail
-  let clean = 0;
-  let failures = 0;
-  let failuresInRow = 0;
-  try {
-    for (let offset = 0; offset < size;) {
-      const length = Math.min(chunk, size - offset);
-      const args = new Uint8Array(8);
-      const dv = new DataView(args.buffer);
-      dv.setUint32(0, offset, true);
-      dv.setUint32(4, length, true);
-      let p;
-      try {
-        p = await link.request(CMD.downloadRead, args, 1500, 300);
-      } catch (e) {
-        const retriable = e instanceof TimeoutError || (e instanceof DeviceError && e.status === 1);
-        const detail = `download at byte ${offset}, ${length} byte read: ${e.detail || e.message}`;
-        console.warn(detail);
-        failures++;
-        if (!retriable || link.closed || ++failuresInRow > kMaxFailuresInRow) {
-          e.message += ` (${detail})`;
-          throw e;
-        }
-        link.resync();
-        ceiling = Math.max(kMinReadChunk, chunk >> 1);
-        chunk = ceiling;
-        clean = 0;
-        continue;
-      }
-      out.set(p.subarray(4, 4 + length), offset);
-      offset += length;
-      onProgress(offset / size);
-      failuresInRow = 0;
-      clean++;
-      if (chunk < ceiling && clean >= kGrowAfter) {
-        chunk = Math.min(ceiling, chunk << 1);
-        clean = 0;
-      }
-      else if (chunk === ceiling && ceiling < maxChunk && clean >= kProbeAfter) {
-        ceiling = Math.min(maxChunk, ceiling << 1);
-        chunk = ceiling;
-        clean = 0;
-      }
-    }
-  } finally {
-    if (!link.closed) { try { await link.request(CMD.downloadClose); } catch (_) {} }
-  }
-  saveReadChunk(ceiling);
-  if (failures) console.info(`download: ${failures} lost replies, finished with ${chunk} byte reads`);
-  return out;
-}
-
-// Audio conversion //////////////////////////////////////////////////////////
-const fourcc = (b, o) => String.fromCharCode(b[o], b[o + 1], b[o + 2], b[o + 3]);
-
-/* Sample rate and cue points of a source WAV, wherever the cue chunk is. */
-function readWavMeta(bytes) {
-  if (bytes.length < 12 || fourcc(bytes, 0) !== "RIFF" || fourcc(bytes, 8) !== "WAVE") return null;
-  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  let sampleRate = 0;
-  let cues = [];
-  let o = 12;
-  while (o + 8 <= bytes.length) {
-    const id = fourcc(bytes, o);
-    const size = dv.getUint32(o + 4, true);
-    const body = o + 8;
-    if (id === "fmt " && body + 8 <= bytes.length) sampleRate = dv.getUint32(body + 4, true);
-    if (id === "cue " && body + 4 <= bytes.length) {
-      const count = dv.getUint32(body, true);
-      for (let i = 0; i < count; i++) {
-        const at = body + 4 + i * 24 + 20;
-        if (at + 4 > bytes.length) break;
-        cues.push(dv.getUint32(at, true));
-      }
-    }
-    o = body + size + (size % 2);
-  }
-  return { sampleRate, cues };
-}
-
-function utf8Truncate(text, maxBytes) {
-  const enc = new TextEncoder();
-  let bytes = enc.encode(text);
-  while (bytes.length > maxBytes) {
-    text = text.slice(0, -1);
-    bytes = enc.encode(text);
-  }
-  return bytes;
-}
-
-function encodeWav(left, right, cues, nameBytes) {
-  const frames = left.length;
-  const dataSize = frames * 8;
-  const fmtSize = 8 + 16;
-  // The name is NUL-padded to a multiple of 4 so the audio starts 4-byte aligned
-  // (header = 64 + INAM size). The device's SD DMA needs aligned reads.
-  const inamSize = nameBytes.length ? (nameBytes.length + 1 + 3) & ~3 : 0;
-  const listSize = inamSize ? 8 + 4 + 8 + inamSize : 0;
-  const cueSize = cues.length ? 8 + 4 + cues.length * 24 : 0;
-  const total = 12 + fmtSize + listSize + 8 + dataSize + cueSize;
-
-  const out = new Uint8Array(total);
-  const dv = new DataView(out.buffer);
-  const id = (o, s) => { for (let i = 0; i < 4; i++) out[o + i] = s.charCodeAt(i); };
-  let o = 0;
-  id(o, "RIFF"); dv.setUint32(o + 4, total - 8, true); id(o + 8, "WAVE"); o += 12;
-
-  id(o, "fmt "); dv.setUint32(o + 4, 16, true);
-  dv.setUint16(o + 8, 3, true);        // IEEE float
-  dv.setUint16(o + 10, 2, true);       // channels
-  dv.setUint32(o + 12, 48000, true);
-  dv.setUint32(o + 16, 48000 * 8, true);
-  dv.setUint16(o + 20, 8, true);       // block align
-  dv.setUint16(o + 22, 32, true);
-  o += fmtSize;
-
-  if (listSize) {
-    id(o, "LIST"); dv.setUint32(o + 4, listSize - 8, true); id(o + 8, "INFO");
-    id(o + 12, "INAM"); dv.setUint32(o + 16, inamSize, true);
-    out.set(nameBytes, o + 20); // NUL terminator and padding are already zero
-    o += listSize;
-  }
-
-  id(o, "data"); dv.setUint32(o + 4, dataSize, true); o += 8;
-  for (let i = 0; i < frames; i++) {
-    dv.setFloat32(o, left[i], true);
-    dv.setFloat32(o + 4, right[i], true);
-    o += 8;
-  }
-
-  if (cueSize) {
-    id(o, "cue "); dv.setUint32(o + 4, cueSize - 8, true); dv.setUint32(o + 8, cues.length, true);
-    o += 12;
-    cues.forEach((offset, i) => {
-      dv.setUint32(o, i + 1, true);
-      dv.setUint32(o + 4, offset, true);
-      id(o + 8, "data");
-      dv.setUint32(o + 12, 0, true);
-      dv.setUint32(o + 16, 0, true);
-      dv.setUint32(o + 20, offset, true);
-      o += 24;
-    });
-  }
-  return out;
-}
-
-async function convert(file, maxFrames, maxCues) {
-  const source = new Uint8Array(await file.arrayBuffer());
-  const meta = readWavMeta(source);
-
-  let audio;
-  try {
-    const ctx = new OfflineAudioContext(2, 1, 48000); // decoding resamples to 48 kHz
-    audio = await ctx.decodeAudioData(source.slice().buffer);
-  } catch (e) {
-    throw new Error(`Can't decode "${file.name}". Supported: WAV, MP3, FLAC, Ogg, AAC/M4A.`);
-  }
-
-  const frames = Math.min(audio.length, maxFrames);
-  const left = audio.getChannelData(0).subarray(0, frames);
-  const right = (audio.numberOfChannels > 1 ? audio.getChannelData(1) : audio.getChannelData(0)).subarray(0, frames);
-
-  let cues = [];
-  if (meta && meta.cues.length && meta.sampleRate) {
-    const ratio = 48000 / meta.sampleRate;
-    cues = [...new Set(meta.cues.map(c => Math.round(c * ratio)))]
-      .filter(c => c < frames)
-      .sort((a, b) => a - b)
-      .slice(0, maxCues);
-  }
-
-  const nameBytes = utf8Truncate(file.name, 64);
-  return {
-    bytes: encodeWav(left, right, cues, nameBytes),
-    truncated: audio.length > maxFrames,
-    cues: cues.length,
-  };
-}
-
 // UI ////////////////////////////////////////////////////////////////////////
 const $ = id => document.getElementById(id);
 const ui = {
@@ -659,7 +174,6 @@ const ui = {
   device: null,
   slots: [],
   busy: null,          // { tape, slot, phase, progress }
-  pingTimer: null,
   pendingSlot: null,   // upload target picked via the file dialog
 };
 
@@ -728,7 +242,7 @@ function render() {
 
 function renderCell(tape, slot, tapeInfo) {
   const info = slotAt(tape, slot);
-  const occupied = info && (info.flags & 1);
+  const occupied = info && (info.flags & SLOT_OCCUPIED);
   const cell = document.createElement("div");
   cell.className = "cell" + (occupied ? " occupied" : "");
   cell.style.setProperty("--tape", tapeInfo.color);
@@ -745,7 +259,7 @@ function renderCell(tape, slot, tapeInfo) {
     meta.className = "meta";
     meta.textContent = `${formatDuration(info.frames, info.sampleRate)} · ${info.cues} cue${info.cues === 1 ? "" : "s"}`;
     cell.append(meta);
-    if (!(info.flags & 2)) {
+    if (!(info.flags & SLOT_LOADABLE)) {
       const badge = document.createElement("div");
       badge.className = "badge";
       badge.textContent = "Not loadable on the device";
@@ -823,7 +337,7 @@ async function operation(tape, slot, phase, work) {
   } finally {
     ui.busy = null;
     if (ui.link) {
-      try { ui.slots = await list(ui.link); ui.device = await hello(ui.link); } catch (e) { showError(e.message); }
+      try { ui.slots = await ui.link.list(); ui.device = await ui.link.hello(); } catch (e) { showError(e.message); }
     }
     render();
   }
@@ -843,11 +357,13 @@ $("file").addEventListener("change", () => {
 function runUpload(tape, slot, file) {
   return operation(tape, slot, "Converting…", async () => {
     const d = ui.device;
-    const converted = await convert(file, d.maxFrames, d.maxCues);
+    const converted = await convertAudio(await file.arrayBuffer(), file.name, d);
     if (converted.truncated) showNote(`"${file.name}" was truncated to ${(d.maxFrames / 48000).toFixed(0)} s.`);
     else showNote("");
     updateBusy("Uploading…", 0);
-    await upload(ui.link, tape, slot, converted.bytes, d.maxChunk, (p, phase) => updateBusy(phase || "Uploading…", p));
+    await ui.link.upload(tape, slot, converted.bytes, {
+      onProgress: p => updateBusy(p >= 1 ? "Verifying…" : "Uploading…", p),
+    });
   });
 }
 
@@ -860,7 +376,7 @@ function downloadName(info, tape, slot) {
 function runDownload(tape, slot) {
   const info = slotAt(tape, slot);
   return operation(tape, slot, "Downloading…", async () => {
-    const bytes = await download(ui.link, tape, slot, ui.device.maxChunk, p => updateBusy("Downloading…", p));
+    const bytes = await ui.link.download(tape, slot, { onProgress: p => updateBusy("Downloading…", p) });
     const url = URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
     const a = document.createElement("a");
     a.href = url;
@@ -873,115 +389,23 @@ function runDownload(tape, slot) {
 }
 
 function runDelete(tape, slot) {
-  return operation(tape, slot, "Deleting…", async () => {
-    await ui.link.request(CMD.remove, slotArgs(tape, slot));
-  });
+  return operation(tape, slot, "Deleting…", () => ui.link.remove(tape, slot));
 }
 
 // Connection ////////////////////////////////////////////////////////////////
 const isLinux = /Linux/.test(navigator.platform) && !/Android/.test(navigator.userAgent);
-const isWindows = /Win/.test(navigator.platform);
 
-async function grantedPort() {
-  const ports = await navigator.serial.getPorts();
-  return ports.find(p => {
-    const i = p.getInfo();
-    return i.usbVendorId === VID && i.usbProductId === PID;
-  });
-}
-
-async function enterTransferMode() {
-  let access;
-  try {
-    access = await navigator.requestMIDIAccess({ sysex: true });
-  } catch (e) {
-    throw new Error("MIDI access was denied. Spotykach is switched to transfer mode via MIDI SysEx — please allow it.");
-  }
-  const match = port => /spotykach/i.test(port.name || "");
-  const outputs = [...access.outputs.values()].filter(match);
-  const inputs = [...access.inputs.values()].filter(match);
-  if (!outputs.length) {
-    throw new Error("Spotykach MIDI port not found. Is it connected via the rear USB-C port?"
-      + (isWindows ? " On Windows, close other apps (e.g. your DAW) that use its MIDI port." : ""));
-  }
-
-  const reply = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      inputs.forEach(i => i.onmidimessage = null);
-      reject(new Error("Spotykach did not respond. Make sure its firmware supports sample transfer."
-        + (isWindows ? " On Windows, close other apps (e.g. your DAW) that use its MIDI port." : "")));
-    }, 3000);
-    inputs.forEach(input => {
-      input.onmidimessage = e => {
-        const d = e.data;
-        if (d.length === 7 && d[0] === 0xF0 && d[1] === 0x7D && d[2] === 0x53 && d[3] === 0x4B && d[4] === 0x02) {
-          clearTimeout(timer);
-          inputs.forEach(i => i.onmidimessage = null);
-          resolve(d[5]);
-        }
-      };
-    });
-  });
-  try {
-    outputs[0].send(SYSEX_ENTER);
-  } catch (e) {
-    throw new Error("Can't send to the Spotykach MIDI port."
-      + (isWindows ? " On Windows, close other apps (e.g. your DAW) that use it." : ""));
-  }
-  const status = await reply;
-  if (status !== 0) throw new Error(ENTER_TEXT[status] || `Spotykach refused transfer mode (${status}).`);
-}
-
-async function waitForPort(timeoutMs) {
-  const start = performance.now();
-  while (performance.now() - start < timeoutMs) {
-    const port = await grantedPort();
-    if (port) return port;
-    await sleep(250);
-  }
-  return null;
-}
-
-async function openPort(port) {
-  setState("Opening serial port…", "wait");
-  const link = new Link(port);
-  let opened = false;
-  for (let attempt = 0; attempt < 8 && !opened; attempt++) {
-    try { await link.open(); opened = true; } catch (e) { await sleep(250); }
-  }
-  if (!opened) {
-    throw new Error("Can't open the Spotykach serial port."
-      + (isLinux ? " On Linux, add your user to the 'dialout' group (or 'uucp' on Arch) and log in again." : ""));
-  }
+async function connected({ link, info }) {
   link.onclose = error => onDisconnected(error);
   ui.link = link;
-
-  const device = await hello(link);
-  if (device.protoMajor !== PROTO_MAJOR) {
-    try { await link.request(CMD.exit); } catch (e) {}
-    throw new Error(`Spotykach uses protocol ${device.protoMajor}.${device.protoMinor}, this page supports ${PROTO_MAJOR}.x. Update the page or the firmware.`);
-  }
-  ui.device = device;
-  ui.slots = await list(link);
+  ui.device = info;
+  ui.slots = await link.list();
   setState("Connected — transfer mode", "on");
-  startPing();
   render();
-}
-
-function startPing() {
-  stopPing();
-  ui.pingTimer = setInterval(() => {
-    if (ui.link && !ui.busy) ui.link.request(CMD.ping).catch(() => {});
-  }, 2000);
-}
-function stopPing() {
-  if (ui.pingTimer) clearInterval(ui.pingTimer);
-  ui.pingTimer = null;
 }
 
 function onDisconnected(error) {
   const wasConnected = !!ui.link;
-  stopPing();
   ui.link = null;
   ui.device = null;
   ui.slots = [];
@@ -995,34 +419,18 @@ async function connect() {
   clearError();
   showNote("");
   $("connect").disabled = true;
+  setState("Switching to transfer mode…", "wait");
   try {
-    // The device may already be in transfer mode, e.g. after a page reload
-    let port = await grantedPort();
-    if (port) {
-      try { await openPort(port); return; } catch (e) { await disconnectQuietly(); }
-    }
-
-    setState("Switching to transfer mode…", "wait");
-    await enterTransferMode();
-
-    setState("Waiting for the serial port…", "wait");
-    port = await waitForPort(2500);
-    if (!port) {
-      // First use: Chrome needs a user gesture to grant the serial port.
-      // The Connect click still counts for a few seconds, then open the picker
-      // right away; otherwise ask for another click.
+    await connected(await connectDevice());
+  } catch (e) {
+    if (e instanceof NeedsAuthorizationError) {
+      // First use, and the Connect click no longer counts as a gesture: ask for another click
       setState("Waiting for permission…", "wait");
       $("connect").classList.add("hidden");
-      showNote("Select Spotykach in the browser's port picker. This is needed only once per computer.");
-      if (navigator.userActivation && navigator.userActivation.isActive) {
-        await authorize();
-      } else {
-        $("authorize").classList.remove("hidden");
-      }
+      $("authorize").classList.remove("hidden");
+      showNote(e.message);
       return;
     }
-    await openPort(port);
-  } catch (e) {
     await disconnectQuietly();
     setState("Disconnected", "");
     showError(e.message);
@@ -1034,10 +442,10 @@ async function connect() {
 async function authorize() {
   clearError();
   try {
-    const port = await navigator.serial.requestPort({ filters: [{ usbVendorId: VID, usbProductId: PID }] });
+    const connection = await authorizePort();
     $("authorize").classList.add("hidden");
     showNote("");
-    await openPort(port);
+    await connected(connection);
   } catch (e) {
     if (e.name === "NotFoundError") {
       // Picker closed without a selection: the device keeps waiting in transfer mode for a minute
@@ -1054,21 +462,22 @@ async function authorize() {
 }
 
 async function disconnectQuietly() {
-  stopPing();
   const link = ui.link;
   ui.link = null;
   ui.device = null;
-  if (link) await link.close();
+  if (link) {
+    link.onclose = null;
+    await link.close();
+  }
 }
 
 async function exitTransfer() {
   const link = ui.link;
   if (!link) return;
   $("exit").disabled = true;
-  stopPing();
-  try { await link.request(CMD.exit); } catch (e) {}
-  link.onclose = null;
-  await disconnectQuietly();
+  ui.link = null;
+  ui.device = null;
+  await link.exit();
   setState("Disconnected", "");
   render();
 }
@@ -1080,16 +489,13 @@ $("exit").onclick = exitTransfer;
 $("error-close").onclick = clearError;
 window.addEventListener("dragover", e => e.preventDefault());
 window.addEventListener("drop", e => e.preventDefault());
-window.addEventListener("beforeunload", () => { if (ui.link) ui.link.request(CMD.exit).catch(() => {}); });
+window.addEventListener("beforeunload", () => { if (ui.link) ui.link.exit(); });
 
-if (!("serial" in navigator) || !("requestMIDIAccess" in navigator)) {
+if (!isSupported()) {
   $("connect").disabled = true;
   showError("This page needs Web Serial and Web MIDI. Please use a Chromium-based browser (Chrome, Edge, Opera) on macOS, Windows or Linux.");
-} else {
-  navigator.serial.addEventListener("disconnect", e => {
-    if (ui.link && e.target === ui.link.port) ui.link.shutdown(new Error("Spotykach disconnected."));
-  });
-  if (isLinux) showNote("Linux: Web Serial needs your user in the 'dialout' group (or 'uucp' on Arch).");
+} else if (isLinux) {
+  showNote("Linux: Web Serial needs your user in the 'dialout' group (or 'uucp' on Arch).");
 }
 render();
 </script>

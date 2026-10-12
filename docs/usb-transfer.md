@@ -111,7 +111,7 @@ If the page gets no reply within 3 s, it reports "device did not respond (old fi
 - Every response payload begins with `status: u8` (§5.4).
 - **Frame errors** are bad magic, `len > MAX_PAYLOAD`, a CRC mismatch, or a partial frame that has received nothing for 2 s. On any of these, the device:
   - drops its RX buffer, then discards incoming bytes until the line has been quiet for 100 ms, so the rest of a broken frame isn't taken for a new one;
-  - replies `BAD_FRAME` with `type = 0x80`. That is the response type of command `0x00`, which is reserved for this purpose; `0xFF` can't be used because it is the response to `EXIT` (`0x7F`);
+  - replies `BAD_FRAME` with `type = 0x80`. The payload is `status u8, reason u8`, with reason one of: `1` checksum mismatch, `2` a partial frame stopped arriving, `3` receive buffer overflow, `4` length above `MAX_PAYLOAD`, `0` unknown. That is the response type of command `0x00`, which is reserved for this purpose; `0xFF` can't be used because it is the response to `EXIT` (`0x7F`);
   - keeps the session (upload or download) as it was, because the broken frame was never processed.
 
   The host may resend the request after waiting at least the quiet time (§5.5). Bytes that arrive before a magic are discarded, which covers modem probing on Linux.
@@ -210,7 +210,7 @@ The duration shown is `frames / sample_rate`.
 
 The whole-file CRC is checked against the bytes as received. The file is not read back from the card; a read-back would roughly double the upload time.
 
-**Download:** `DOWNLOAD_OPEN` → `DOWNLOAD_READ` until `size` bytes have arrived → `DOWNLOAD_CLOSE`. `DOWNLOAD_READ` offsets must be multiples of 512; otherwise the device replies `BAD_ARG`. The page's read sizes are powers of two of at least 1 KiB, so its offsets always are. The frame CRC protects every chunk. The host saves the bytes unchanged.
+**Download:** `DOWNLOAD_OPEN` → `DOWNLOAD_READ` until `size` bytes have arrived → `DOWNLOAD_CLOSE`. `DOWNLOAD_READ` offsets must be multiples of 512; otherwise the device replies `BAD_ARG`. That way FatFS always reads straight into the word-aligned reply (see SD DMA alignment, §10.1). A client that wants a range starting elsewhere, such as the cue chunk after the audio, reads from the 512-byte boundary below it and drops the extra bytes; the package's `readSlot` does this. The frame CRC protects every chunk. The host saves the bytes unchanged.
 
 On macOS the serial tty can drop the tail of a large device-to-host burst when Chrome doesn't drain it fast enough. Uploads aren't affected. `DOWNLOAD_READ` names an absolute offset and length, so the host recovers without any firmware help:
 - **Loss detection.** A reply counts as lost when it stops arriving for 300 ms partway through, or doesn't start within 1.5 s.
@@ -316,7 +316,13 @@ No libDaisy changes were needed:
 
 ## 8. Web app
 
-Location: `web/index.html`, a single file of plain HTML/JS/CSS with no dependencies. It is deployed to GitHub Pages manually by `.github/workflows/pages.yml`, which publishes `web/` from a chosen branch, tag or commit (default `uploader`). GitHub only offers "Run workflow" for workflows present on the default branch, so that file has to exist on `main` too; the rest of the code can stay on its branch. Under Settings → Pages, Source must be "GitHub Actions".
+Location: `web/index.html`, plain HTML/CSS with an inline module script and no build step.
+
+The protocol, connection and WAV code is the package **`@synthux/spotykach-transfer`** in `web/spotykach-transfer/`. It's a single framework-free ES module with TypeScript declarations, so other web apps can speak the protocol without copying it; WAV Builder is the first. The page imports it by relative path, so it is always the version in the same commit as the firmware. The package's major version follows the protocol major version. Its README covers the API and releasing: a tag `spotykach-transfer-v<version>` runs `.github/workflows/transfer-publish.yml`, which tests and publishes it to npm.
+
+Locally the page must be served over HTTP, because browsers don't load ES modules from `file://`: `python3 -m http.server -d web 8000`, then open http://localhost:8000. Opened as a file, the page says so.
+
+The page, with the package next to it, is deployed to GitHub Pages manually by `.github/workflows/pages.yml`, which publishes `web/` from a chosen branch, tag or commit (default `uploader`). GitHub only offers "Run workflow" for workflows present on the default branch, so that file has to exist on `main` too; the rest of the code can stay on its branch. Under Settings → Pages, Source must be "GitHub Actions".
 
 ### 8.1 Requirements
 - A Chromium-based browser with `navigator.serial` and `navigator.requestMIDIAccess`. Otherwise the page shows a "use Chrome or Edge" message.
@@ -371,7 +377,7 @@ SD DMA alignment (shifted audio, engine muted until power cycle):
   - `Card` reads audio and the cue tail from the sector boundary below the wanted position into its aligned buffer and skips the head (`Card::_read_from`, public `read_at`). The slot listing's cue read uses it too.
   - While loading, samples whose exponent bits are all ones (NaN/Inf) are replaced with 0. This is a bit test, because `-ffast-math` makes `std::isfinite` always true.
   - The web encoder pads `INAM` to a multiple of 4 (§6.1).
-  - `UPLOAD_DATA` chunk sizes and `DOWNLOAD_READ` offsets must be multiples of 512 (§5.5).
+  - `UPLOAD_DATA` chunk sizes must be multiples of 512 except the last, and `DOWNLOAD_READ` offsets must be multiples of 512 (§5.5).
 - Files already on the card load correctly with the new firmware; there's no need to upload them again.
 
 Path buffers (stack overflow on every load):
@@ -400,14 +406,20 @@ Cue points / slices:
 ## 11. Implementation status
 Everything in §3–§8 is implemented: firmware (`src/transfer/`, plus changes in `app.cpp`, `Card`, `Storage`, `CoreMIDI`, `CoreUI` and `Hardware`), `web/index.html`, and `.github/workflows/pages.yml`.
 
-### Verified on the host
-- The real `service`, `link`, `card`, `wav` and `slots` sources were compiled for macOS with stubs for FatFS (backed by a directory), USB and `System`. They ran under AddressSanitizer/UBSan.
-- The page's own protocol and WAV code drove them through a fake serial port. The run covered:
-  - `HELLO` and `LIST`;
-  - an upload with a UTF-8 name and 255 cues, then a byte-exact download;
-  - rejection of a bad CRC (old slot kept, temp removed), a non-WAV file, a bad offset, a wrong state, a bad argument and an unknown command;
-  - a corrupted frame, garbage on the line, a 42 s (16.1 MB) round trip, `DELETE` and `EXIT`.
-- A file encoded by the page loads through `Card::init_read_audio`/`read_audio` with 255 cues plus the end slice (256 slices, the last at the file end).
+### Tests (`tests/transfer/`, run by `run.sh` and in CI)
+The firmware's `service`, `link`, `card`, `wav` and `slots` sources are compiled for the host under AddressSanitizer/UBSan, with stubs for libDaisy, USB and FatFS (`stub/`, `fatfs_stub.cpp`). The FatFS stand-in keeps files in a directory and flags every read or write the SD DMA couldn't do.
+
+- **`card_load_test`:** loads WAVs whose audio starts at every alignment, containing a NaN, an Inf and 255 cues, through `Card::init_read_audio`/`read_audio`. Checks the samples, NaN/Inf → 0, 256 slices, and no unaligned DMA.
+- **`harness`:** the device's transfer service on stdin/stdout. `transfer.test.mjs` runs `@synthux/spotykach-transfer` against it over a fake serial port. It covers:
+  - `HELLO`, `LIST`, upload, byte-exact download and `DELETE`;
+  - `readSlot` ranges at unaligned offsets;
+  - upload recovery from a corrupted request, a lost reply and a 2.5 s stall;
+  - download recovery from cut, dropped and burst-truncated replies;
+  - failed uploads keeping the old slot (bad CRC, non-WAV);
+  - invalid requests, garbage on the line;
+  - `encodeWav` alignment for every name length.
+
+`.github/workflows/transfer-tests.yml` runs them on every change to either side of the protocol.
 
 ### Still to verify on hardware, in this order
 1. **The USB switch.** SysEx enter → serial port appears → `EXIT` → MIDI comes back, on macOS, Windows and Linux (risks §9.1–§9.4).

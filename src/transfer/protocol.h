@@ -66,6 +66,15 @@ enum class Status: uint8_t {
     bad_format  = 12
 };
 
+// Why a frame was rejected: second payload byte of a BAD_FRAME reply (type kFrameErrorType)
+enum class FrameError: uint8_t {
+    unknown    = 0,
+    crc        = 1, // checksum mismatch, bytes changed on the way
+    stale      = 2, // a partial frame stopped arriving
+    overflow   = 3, // more data than the receive buffer holds
+    bad_length = 4  // header announces a payload above kMaxPayload
+};
+
 // List entry flags
 static constexpr uint8_t kSlotOccupied = 1 << 0;
 static constexpr uint8_t kSlotLoadable = 1 << 1;

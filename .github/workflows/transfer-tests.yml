@@ -1,0 +1,35 @@
+name: Transfer protocol tests
+
+# The firmware's transfer code built for the host, with @synthux/spotykach-transfer
+# run against it, so both sides of the protocol stay in sync.
+on:
+  push:
+    paths:
+      - src/transfer/**
+      - src/hw/card.*
+      - src/memory/wav.*
+      - src/memory/slots.*
+      - web/spotykach-transfer/**
+      - tests/transfer/**
+      - .github/workflows/transfer-tests.yml
+  pull_request:
+    paths:
+      - src/transfer/**
+      - src/hw/card.*
+      - src/memory/wav.*
+      - src/memory/slots.*
+      - web/spotykach-transfer/**
+      - tests/transfer/**
+      - .github/workflows/transfer-tests.yml
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: tests/transfer/run.sh
