@@ -1,6 +1,6 @@
 {
   "name": "@synthuxacademy/spotykach-transfer",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Host side of the Spotykach USB sample transfer protocol: Web Serial link, Web MIDI switch, WAV preparation",
   "type": "module",
   "main": "./index.js",

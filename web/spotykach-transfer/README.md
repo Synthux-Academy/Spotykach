@@ -67,7 +67,7 @@ The major version follows the protocol major version (`PROTO_MAJOR`), so `1.x` t
 
 | Package | Protocol | Firmware |
 |---|---|---|
-| 1.0.0 | 1.0 | `uploader` branch, first release with USB transfer |
+| 1.0.1 | 1.0 | `uploader` branch, first release with USB transfer |
 
 ## Development
 
