@@ -1,6 +1,6 @@
 #!/bin/sh
 # Builds the firmware's transfer code for the host and tests it, then runs the
-# @synthux/spotykach-transfer package against it. Needs a C++17 compiler and Node 20+.
+# @synthuxacademy/spotykach-transfer package against it. Needs a C++17 compiler and Node 20+.
 set -e
 cd "$(dirname "$0")"
 ROOT=../..

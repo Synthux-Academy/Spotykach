@@ -1,4 +1,4 @@
-# @synthux/spotykach-transfer
+# @synthuxacademy/spotykach-transfer
 
 Host side of the Spotykach USB sample transfer protocol, for web apps in Chromium-based browsers. It:
 
@@ -11,7 +11,7 @@ It lives in the [Spotykach firmware repository](https://github.com/Synthux-Acade
 ## Install
 
 ```sh
-npm install @synthux/spotykach-transfer
+npm install @synthuxacademy/spotykach-transfer
 ```
 
 It's a single framework-free ES module with TypeScript types and no dependencies. Without a bundler, import `index.js` directly.
@@ -21,7 +21,7 @@ It's a single framework-free ES module with TypeScript types and no dependencies
 ```js
 import {
   connect, authorizePort, NeedsAuthorizationError, convertAudio, SLOT_OCCUPIED,
-} from "@synthux/spotykach-transfer";
+} from "@synthuxacademy/spotykach-transfer";
 
 // From a click
 let connection;
@@ -81,7 +81,7 @@ This builds the firmware's transfer code for the host (C++17 compiler needed) an
 
 ### Releasing
 
-1. Update `version` in `package.json` and the table above.
+1. Update `version` in `package.json` and the table above, and commit.
 2. Push a tag `spotykach-transfer-v<version>`, e.g. `spotykach-transfer-v1.0.1`.
 
-The publish workflow runs the tests, checks that the tag matches `package.json`, and publishes to npm.
+The publish workflow (`.github/workflows/transfer-publish.yml`) runs the tests, checks that the tag matches `package.json`, and publishes to npm through trusted publishing, with no token. The package's npm settings list this repository and workflow as its trusted publisher.

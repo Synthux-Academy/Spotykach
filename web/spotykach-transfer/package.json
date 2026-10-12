@@ -1,5 +1,5 @@
 {
-  "name": "@synthux/spotykach-transfer",
+  "name": "@synthuxacademy/spotykach-transfer",
   "version": "1.0.0",
   "description": "Host side of the Spotykach USB sample transfer protocol: Web Serial link, Web MIDI switch, WAV preparation",
   "type": "module",
@@ -13,7 +13,7 @@
   },
   "files": ["index.js", "index.d.ts", "README.md", "LICENSE"],
   "sideEffects": false,
-  "keywords": ["spotykach", "synthux", "web-serial", "web-midi", "wav"],
+  "keywords": ["spotykach", "synthux", "synthuxacademy", "web-serial", "web-midi", "wav"],
   "license": "MIT",
   "repository": {
     "type": "git",

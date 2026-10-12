@@ -320,7 +320,7 @@ No libDaisy changes were needed:
 
 Location: `web/index.html`, plain HTML/CSS with an inline module script and no build step.
 
-The protocol, connection and WAV code is the package **`@synthux/spotykach-transfer`** in `web/spotykach-transfer/`. It's a single framework-free ES module with TypeScript declarations, so other web apps can speak the protocol without copying it; WAV Builder is the first. The page imports it by relative path, so it is always the version in the same commit as the firmware. The package's major version follows the protocol major version. Its README covers the API and releasing: a tag `spotykach-transfer-v<version>` runs `.github/workflows/transfer-publish.yml`, which tests and publishes it to npm.
+The protocol, connection and WAV code is the package **`@synthuxacademy/spotykach-transfer`** in `web/spotykach-transfer/`. It's a single framework-free ES module with TypeScript declarations, so other web apps can speak the protocol without copying it; WAV Builder is the first. The page imports it by relative path, so it is always the version in the same commit as the firmware. The package's major version follows the protocol major version. Its README covers the API and releasing: a tag `spotykach-transfer-v<version>` runs `.github/workflows/transfer-publish.yml`, which tests and publishes it to npm.
 
 Locally the page must be served over HTTP, because browsers don't load ES modules from `file://`: `python3 -m http.server -d web 8000`, then open http://localhost:8000. Opened as a file, the page says so.
 
@@ -412,7 +412,7 @@ Everything in §3–§8 is implemented: firmware (`src/transfer/`, plus changes 
 The firmware's `service`, `link`, `card`, `wav` and `slots` sources are compiled for the host under AddressSanitizer/UBSan, with stubs for libDaisy, USB and FatFS (`stub/`, `fatfs_stub.cpp`). The FatFS stand-in keeps files in a directory and flags every read or write the SD DMA couldn't do.
 
 - **`card_load_test`:** loads WAVs whose audio starts at every alignment, containing a NaN, an Inf and 255 cues, through `Card::init_read_audio`/`read_audio`. Checks the samples, NaN/Inf → 0, 256 slices, and no unaligned DMA.
-- **`harness`:** the device's transfer service on stdin/stdout. `transfer.test.mjs` runs `@synthux/spotykach-transfer` against it over a fake serial port. It covers:
+- **`harness`:** the device's transfer service on stdin/stdout. `transfer.test.mjs` runs `@synthuxacademy/spotykach-transfer` against it over a fake serial port. It covers:
   - `HELLO`, `LIST`, upload, byte-exact download and `DELETE`;
   - `readSlot` ranges at unaligned offsets;
   - upload recovery from a corrupted request, a lost reply and a 2.5 s stall;

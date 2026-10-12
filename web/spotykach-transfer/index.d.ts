@@ -1,4 +1,4 @@
-// Types for @synthux/spotykach-transfer.
+// Types for @synthuxacademy/spotykach-transfer.
 
 /** The parts of a Web Serial `SerialPort` the link uses; a real SerialPort fits. */
 export interface SerialPortLike {

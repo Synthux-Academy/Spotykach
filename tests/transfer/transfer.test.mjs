@@ -1,4 +1,4 @@
-// @synthux/spotykach-transfer against the firmware's transfer code (build/harness),
+// @synthuxacademy/spotykach-transfer against the firmware's transfer code (build/harness),
 // over a fake Web Serial port. Run through run.sh.
 import { test } from "node:test";
 import assert from "node:assert/strict";

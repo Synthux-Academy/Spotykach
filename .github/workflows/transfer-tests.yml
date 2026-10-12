@@ -1,6 +1,6 @@
 name: Transfer protocol tests
 
-# The firmware's transfer code built for the host, with @synthux/spotykach-transfer
+# The firmware's transfer code built for the host, with @synthuxacademy/spotykach-transfer
 # run against it, so both sides of the protocol stay in sync.
 on:
   push:
