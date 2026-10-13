@@ -211,6 +211,19 @@ function saveReadChunk(chunk) {
   } catch (e) { /* storage blocked */ }
 }
 
+/**
+ * `e` with `detail` appended to its message. The serial port's own errors are
+ * DOMExceptions, whose message can't be set: those come back wrapped, as `cause`.
+ */
+function withDetail(e, detail) {
+  try {
+    e.message += ` (${detail})`;
+    return e;
+  } catch (_) {
+    return new Error(`${e.message} (${detail})`, { cause: e });
+  }
+}
+
 const isRetriable = e => e instanceof TimeoutError || (e instanceof DeviceError && e.status === STATUS.badFrame);
 
 // Link ///////////////////////////////////////////////////////////////////////
@@ -557,8 +570,7 @@ export class SkLink {
         const detail = `upload at byte ${offset}, attempt ${attempt}: ${e.detail || e.message}`;
         console.warn(`[spotykach] ${detail}`);
         if (!retriable || this.closed || attempt > MAX_UPLOAD_RETRIES) {
-          e.message += ` (${detail})`;
-          throw e;
+          throw withDetail(e, detail);
         }
         await sleep(DEVICE_QUIET_MS);
         this._resync();
@@ -620,8 +632,7 @@ export class SkLink {
         console.warn(`[spotykach] ${detail}`);
         failures++;
         if (!isRetriable(e) || this.closed || ++failuresInRow > MAX_READ_FAILURES_IN_ROW) {
-          e.message += ` (${detail})`;
-          throw e;
+          throw withDetail(e, detail);
         }
         this._resync();
         ceiling = Math.max(MIN_READ_CHUNK, chunk >> 1);

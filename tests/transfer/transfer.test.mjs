@@ -224,6 +224,16 @@ test("failed uploads keep the old slot", async () => {
   await device.stop();
 });
 
+test("a serial port error keeps its message, with the detail", async () => {
+  // Web Serial fails with a DOMException, whose message can't be appended to
+  const link = new SkLink({});
+  link.request = async () => { throw new DOMException("The device has been lost.", "NetworkError"); };
+  await assert.rejects(link._sendChunk(new Uint8Array(8), 4096, 4),
+    e => /device has been lost/.test(e.message) && /upload at byte 4096/.test(e.message) && e.cause?.name === "NetworkError");
+  await assert.rejects(link._readRange(0, 4096, 4096),
+    e => /device has been lost/.test(e.message) && /read at byte 0/.test(e.message) && e.cause?.name === "NetworkError");
+});
+
 test("invalid requests", async () => {
   const device = await startDevice();
   const { link } = device;
