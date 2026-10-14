@@ -52,7 +52,7 @@ private:
 // STATIC CONFIG ///////////////////////////////////////////////
 // Firmware .....................................
 // MAJOR.MINOR.PATCH, update together with the release tag (v1.3.1 <-> "1.3.1")
-static constexpr const char* kFirmwareVersion = "1.3.1";
+static constexpr const char* kFirmwareVersion = "1.4.0.b2";
 
 // Clock ........................................
 static constexpr uint8_t kPPQNIntern = 48;
