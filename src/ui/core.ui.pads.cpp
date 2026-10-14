@@ -4,6 +4,11 @@ using namespace spotykach;
 
 void CoreUI::_on_pad_touch(Hardware::Pad pad) 
 {
+    if (_is_transfer) {
+        if (pad == Hardware::Pad::PlayA || pad == Hardware::Pad::PlayB) _transfer_exit = true;
+        return;
+    }
+
     auto& deck_a = _core.deck(Deck::A);
     auto& deck_b = _core.deck(Deck::B);
     auto is_alt_touched = _touched.test(Alt);
@@ -112,6 +117,8 @@ void CoreUI::_on_pad_touch(Hardware::Pad pad)
 
 void CoreUI::_on_pad_release(Hardware::Pad pad) 
 {   
+    if (_is_transfer) return;
+
     using P = Hardware::Pad;
     switch (pad) {
         case P::SeqA: 
@@ -212,4 +219,27 @@ void CoreUI::_on_alt_touch()
         _clock_source_changed = true;
         _value_display_timeout.start();
     }
+}
+
+// USB transfer mode ...............................
+void CoreUI::set_transfer(const bool is_active)
+{
+    if (!is_active) {
+        // Releases were ignored during transfer, start from a clean state
+        _touched.reset();
+        _tap_hold.end();
+        _reset_changing_value_id();
+    }
+    _transfer_exit = false;
+    _transfer_busy = false;
+    _transfer_progress = 0.f;
+    _is_transfer = is_active;
+}
+
+bool CoreUI::process_transfer()
+{
+    _hw.ProcessPads();
+    auto exit = _transfer_exit;
+    _transfer_exit = false;
+    return exit;
 }

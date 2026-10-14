@@ -3,6 +3,7 @@
 #include <array>
 #include <functional>
 #include "hw/card.h"
+#include "slots.h"
 #include "hw/buffer.sdram.h"
 #include "core/deck.h"
 #include "core/config.h"
@@ -15,8 +16,6 @@ static const std::string kMemory = "SK/MEM";
 
 class Storage;
 
-static constexpr uint8_t kStorageTapeCount = 6;
-static constexpr uint8_t kStorageSlotCount = 6;
 
 class DeckStorage {
 
@@ -254,8 +253,53 @@ class Storage {
 
         DeckStorage& of(Deck::Ref ref) { return _deck_storage[ref]; }
 
+        /* USB transfer mode. Blocking, call from the main loop only.
+        Returns false if storage is busy or the card can't be mounted. */
+        enum class TransferCheck: uint8_t { ok, busy, no_card };
+        TransferCheck begin_transfer()
+        {
+            if (_preload_step != PreloadStep::done 
+                || _opening_deck != Deck::None
+                || of(Deck::A).is_processing() 
+                || of(Deck::B).is_processing()) {
+                return TransferCheck::busy;
+            }
+
+            _deck_storage[Deck::A].deactivate();
+            _deck_storage[Deck::B].deactivate();
+
+            if (_card.state() != Card::State::idle && !_mount_with_retries()) {
+                _card.unmount();
+                return TransferCheck::no_card;
+            }
+            if (!_card.begin_transfer()) {
+                return TransferCheck::busy;
+            }
+            return TransferCheck::ok;
+        }
+
+        void end_transfer()
+        {
+            _card.end_transfer();
+            _card.unmount();
+        }
+
+        Card& card() { return _card; }
+
     private:
         NOCOPY(Storage)
+
+        bool _mount_with_retries()
+        {
+            // Same pattern as on deck activation: recognize, wait, mount
+            for (uint8_t i = 0; i < 3; i++) {
+                _card.recognize();
+                daisy::System::Delay(200);
+                if (_card.mount()) return true;
+                _card.unmount();
+            }
+            return false;
+        }
 
         void _do_read_settings()
         {

@@ -1,0 +1,26 @@
+{
+  "name": "@synthuxacademy/spotykach-transfer",
+  "version": "1.0.1",
+  "description": "Host side of the Spotykach USB sample transfer protocol: Web Serial link, Web MIDI switch, WAV preparation",
+  "type": "module",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  },
+  "files": ["index.js", "index.d.ts", "README.md", "LICENSE"],
+  "sideEffects": false,
+  "keywords": ["spotykach", "synthux", "synthuxacademy", "web-serial", "web-midi", "wav"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Synthux-Academy/Spotykach.git",
+    "directory": "web/spotykach-transfer"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

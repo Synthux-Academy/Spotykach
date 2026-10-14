@@ -8,6 +8,7 @@
 #include "ui/core.ui.h"
 #include "core/core.h"
 #include "memory/storage.h"
+#include "transfer/usb.transfer.h"
 #include "expose.h"
 
 // #define METER
@@ -38,6 +39,7 @@ class AppImpl {
     }
     Core& core() { return _core; }
     CoreUI& ui() { return _ui; }
+    bool is_transfer() const { return _usb_transfer.is_active(); }
 
     void ProcessAudio(AudioHandle::InputBuffer  in,
                       AudioHandle::OutputBuffer out,
@@ -57,6 +59,7 @@ class AppImpl {
     Hardware    _hw;
     Settings    _settings;
     Storage     _storage;
+    USBTransfer _usb_transfer { _hw, _core, _ui, _storage };
 };
 };
 
@@ -67,8 +70,10 @@ static AppImpl impl;
 static int8_t leds_update_counter = 0;
 void T5Callback(void* data) 
 {
-    impl.ui().process_gate_in();
-    impl.core().prepare();
+    if (!impl.is_transfer()) {
+        impl.ui().process_gate_in();
+        impl.core().prepare();
+    }
     if (leds_update_counter++ == 3) {
         leds_update_counter = 0;
         impl.ui().render_leds();
@@ -121,6 +126,7 @@ void AppImpl::Init()
     
     _storage.init(_core.deck(Deck::A), _core.deck(Deck::B));
     _storage.read_settigs();
+    _usb_transfer.init();
 
     Log::StartLog(false);
 #if DEBUG
@@ -156,8 +162,17 @@ void AppImpl::Loop()
             System::ResetToBootloader(System::BootloaderMode::DAISY_INFINITE_TIMEOUT);
         }
 
+        if (_usb_transfer.is_active()) {
+            _usb_transfer.process();
+            continue;
+        }
+
         _ui.process();
         _storage.process();
+
+        #ifndef DEBUG
+        _usb_transfer.check_request();
+        #endif
         
         #if DEBUG
         if(_log_timer.HasPassedMs(250))
@@ -184,6 +199,12 @@ void AppImpl::ProcessAudio(AudioHandle::InputBuffer  in,
                            AudioHandle::OutputBuffer out,
                            size_t                    size)
 {
+    if (_usb_transfer.is_active()) {
+        auto channels = _hw.seed.audio_handle.GetChannels();
+        for (size_t ch = 0; ch < channels; ch++) std::fill(out[ch], out[ch] + size, 0.f);
+        return;
+    }
+
     #ifdef METER
     Meter::cpu().load.OnBlockStart();
     #endif
