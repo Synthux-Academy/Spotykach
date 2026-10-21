@@ -16,7 +16,7 @@ export const USB_PRODUCT_ID = 0x5740;
 
 /** Protocol version this module speaks; the package major version follows the protocol major. */
 export const PROTO_MAJOR = 1;
-export const PROTO_MINOR = 0;
+export const PROTO_MINOR = 1;
 
 const SYSEX_ENTER = [0xF0, 0x7D, 0x53, 0x4B, 0x01, 0xF7];
 const SYSEX_REPLY_PREFIX = [0xF0, 0x7D, 0x53, 0x4B, 0x02];
@@ -40,6 +40,8 @@ export const CMD = Object.freeze({
   downloadRead: 0x21,
   downloadClose: 0x22,
   remove: 0x30,
+  configRead: 0x40,
+  configWrite: 0x41,
   exit: 0x7F,
 });
 
@@ -665,6 +667,38 @@ export class SkLink {
     await this.exclusive(() => this.request(CMD.remove, slotArgs(tape, slot)));
   }
 
+  /** Protocol 1.1 and up: `readConfig` / `writeConfig`. */
+  hasConfig() {
+    return !!this.info && this.info.protoMinor >= 1;
+  }
+
+  /** The text of `SK/config.txt`, null if the card has none. See `parseConfig`. */
+  readConfig() {
+    return this.exclusive(async () => {
+      try {
+        const p = await this.request(CMD.configRead);
+        return new TextDecoder().decode(p.subarray(4));
+      } catch (e) {
+        if (e instanceof DeviceError && e.status === STATUS.notFound) return null;
+        throw e;
+      }
+    });
+  }
+
+  /**
+   * Replaces `SK/config.txt`; a failed write keeps the old file. The device reads
+   * it on power-on, so the settings apply from the next start. See `formatConfig`.
+   */
+  writeConfig(text) {
+    return this.exclusive(async () => {
+      const bytes = new TextEncoder().encode(text);
+      if (bytes.length > this._maxChunk()) throw new Error(`The settings file is larger than ${this._maxChunk()} bytes.`);
+      const payload = new Uint8Array(4 + bytes.length);
+      payload.set(bytes, 4);
+      await this.request(CMD.configWrite, payload, 10000);
+    });
+  }
+
   /** Back to USB MIDI and closes the port. Best effort: the device also leaves after 10 s of silence. */
   async exit() {
     this.stopKeepAlive();
@@ -674,6 +708,90 @@ export class SkLink {
     this.onclose = null;
     await this.close();
   }
+}
+
+// Settings ///////////////////////////////////////////////////////////////////
+
+/**
+ * The keys of `SK/config.txt` the firmware knows, with the value it uses when a
+ * key is missing. The file is a key line followed by a value line (an integer).
+ */
+export const CONFIG_KEYS = Object.freeze({
+  mid_ch_a: { min: 1, max: 16, default: 1 },  // MIDI channel of deck A
+  mid_ch_b: { min: 1, max: 16, default: 2 },
+  mid_ps_a: { min: 0, max: 1, default: 0 },   // MIDI Start/Stop starts/stops deck A
+  mid_ps_b: { min: 0, max: 1, default: 0 },
+  pre_load: { min: 0, max: 1, default: 1 },   // load the recent files on power-on
+  slc_mn_a: { min: 0, max: 1, default: 0 },   // deck A slice mode is monophonic
+  slc_mn_b: { min: 0, max: 1, default: 0 },
+  cue_sm_a: { min: 0, max: 2, default: 0 },   // deck A Size and cue points, see CUE_SIZE_MODE
+  cue_sm_b: { min: 0, max: 2, default: 0 },
+  grt_mx_a: { min: 0, max: 10, default: 3 },  // deck A initial Grit mix, tenths
+  grt_mx_b: { min: 0, max: 10, default: 3 },
+});
+
+/** `cue_sm_a` / `cue_sm_b` values */
+export const CUE_SIZE_MODE = Object.freeze({
+  ignore: 0, // Size ignores cue points
+  snap: 1,   // Size snaps to cue points, Alt+Size is free
+  free: 2,   // Size is free, Alt+Size snaps to cue points
+});
+
+const CONFIG_KEY_LENGTH = 8; // the device compares the first 8 characters, spaces removed
+const isConfigNumber = line => /^-?[0-9]*$/.test(line) && line.length > 0;
+
+/* The file's lines the way the device reads them: spaces dropped, empty lines skipped. */
+function configLines(text) {
+  return (text || "").split(/\r\n|\r|\n/).map(raw => {
+    const line = raw.replace(/ /g, "");
+    return { raw, line, isValue: isConfigNumber(line), key: line.slice(0, CONFIG_KEY_LENGTH) };
+  });
+}
+
+/**
+ * The settings in `SK/config.txt` as `{ key: value }` for every CONFIG_KEYS key,
+ * read like the device does; missing keys get their default. Values outside a
+ * key's range are clamped, the way the settings page shows them.
+ */
+export function parseConfig(text) {
+  const values = Object.fromEntries(Object.entries(CONFIG_KEYS).map(([key, spec]) => [key, spec.default]));
+  let key = null;
+  for (const { line, isValue, key: lineKey } of configLines(text)) {
+    if (!line) continue;
+    if (!isValue) { key = lineKey; continue; }
+    const spec = Object.hasOwn(CONFIG_KEYS, key) ? CONFIG_KEYS[key] : null;
+    if (spec) values[key] = Math.min(spec.max, Math.max(spec.min, parseInt(line, 10) || 0));
+  }
+  return values;
+}
+
+/**
+ * `text` (the current file, or null) with the given settings written into it:
+ * known keys get their value in place, missing ones are appended, and other
+ * lines (unknown keys, notes) stay as they were.
+ */
+export function formatConfig(values, text = null) {
+  const lines = configLines(text);
+  const eol = /\r\n/.test(text || "") ? "\r\n" : "\n";
+  const isKnown = key => Object.hasOwn(CONFIG_KEYS, key) && Object.hasOwn(values, key);
+  const written = new Set();
+  const out = [];
+  let key = null;
+  for (const { raw, line, isValue, key: lineKey } of lines) {
+    if (line && !isValue) key = lineKey;
+    if (line && isValue && isKnown(key)) {
+      // Repeated value lines: the device takes the last one, write it once
+      if (!written.has(key)) out.push(String(values[key]));
+      written.add(key);
+      continue;
+    }
+    out.push(raw);
+  }
+  while (out.length && out[out.length - 1] === "") out.pop();
+  for (const key of Object.keys(CONFIG_KEYS)) {
+    if (isKnown(key) && !written.has(key)) out.push(key, String(values[key]));
+  }
+  return out.join(eol) + eol;
 }
 
 // Connecting /////////////////////////////////////////////////////////////////
@@ -711,9 +829,9 @@ const ENTER_TEXT = {
 const MIDI_ACCESS_MS = 8000;
 const MIDI_OPEN_MS = 5000;
 
-function within(promise, ms, message) {
+function within(promise, ms, message, onTimeout) {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(message)), ms);
+    const timer = setTimeout(() => { onTimeout?.(); reject(new Error(message)); }, ms);
     promise.then(resolve, reject).finally(() => clearTimeout(timer));
   });
 }
@@ -731,15 +849,23 @@ async function midiPermission() {
  * Both MIDI ports are opened before sending so the reply can't be missed; the
  * request is sent twice at most. A MIDI port that disappears meanwhile means the
  * device switched and only its reply got lost.
+ * `onStep` gets a line for each step, for diagnostics.
  */
-export async function enterTransferMode() {
+export async function enterTransferMode({ onStep = () => {} } = {}) {
   const permission = await midiPermission();
+  onStep(`MIDI permission: ${permission}`);
+  const asked = now();
+  const after = () => `after ${((now() - asked) / 1000).toFixed(1)} s`;
   const request = navigator.requestMIDIAccess({ sysex: true }).catch(e => {
     throw new Error("MIDI access was denied. Spotykach is switched to transfer mode through MIDI SysEx, please allow it.", { cause: e });
   });
   // A permission prompt waits on the user, so no time limit then
   const access = permission === "prompt" ? await request : await within(request, MIDI_ACCESS_MS,
-    `The browser didn't give access to MIDI within ${MIDI_ACCESS_MS / 1000} s. Close other apps and tabs that use MIDI, or try another Chromium-based browser.`);
+    `The browser didn't give access to MIDI within ${MIDI_ACCESS_MS / 1000} s. Close other apps and tabs that use MIDI, or try another Chromium-based browser.`,
+    // Tells a slow MIDI access from one that never comes
+    () => request.then(() => onStep(`MIDI access came late, ${after()}`), e => onStep(`MIDI access failed late, ${after()}: ${e.cause?.message}`)));
+  const ports = [...access.inputs.values(), ...access.outputs.values()];
+  onStep(`MIDI ports: ${ports.map(p => `${p.type} "${p.name}" (${p.state})`).join(", ") || "none"}`);
   const isSpotykach = port => /spotykach/i.test(port.name || "");
   const output = [...access.outputs.values()].find(isSpotykach);
   const inputs = [...access.inputs.values()].filter(isSpotykach);
@@ -762,12 +888,17 @@ export async function enterTransferMode() {
       onReply();
     };
   }
-  const switched = () => output.state === "disconnected";
+  const switched = () => {
+    if (output.state !== "disconnected") return false;
+    onStep("the MIDI port is gone: the device switched");
+    return true;
+  };
 
   try {
     for (let attempt = 0; attempt < 2 && status === null; attempt++) {
       if (switched()) return;
       try {
+        onStep(`sending SysEx: enter transfer mode${attempt ? ", again" : ""}`);
         output.send(SYSEX_ENTER);
       } catch (e) {
         if (switched()) return;
@@ -787,14 +918,17 @@ export async function enterTransferMode() {
     if (switched()) return;
     throw new Error("Spotykach didn't respond. Its firmware may not support USB transfer." + portHint());
   }
+  onStep(`reply: ${status === 0 ? "OK" : status}`);
   if (status !== 0) throw new Error(ENTER_TEXT[status] || `Spotykach refused transfer mode (${status}).`);
 }
 
 /** Opens the port and checks HELLO. Resolves to `{ link, info }`, with the keep-alive running. */
-export async function handshake(port) {
+export async function handshake(port, { onStep = () => {} } = {}) {
+  onStep("opening the serial port and sending HELLO");
   const link = await SkLink.open(port);
   try {
     const info = await link.hello();
+    onStep(`HELLO: firmware ${info.firmware}, protocol ${info.protoMajor}.${info.protoMinor}`);
     if (info.protoMajor !== PROTO_MAJOR) {
       await link.exit();
       throw new ProtocolMismatchError(info.protoMajor, info.protoMinor);
@@ -812,43 +946,48 @@ export async function handshake(port) {
  * a reload), otherwise switches the device and waits for its serial port.
  * On first use, once the click that started this has expired, throws
  * `NeedsAuthorizationError`: call `authorizePort()` from a fresh click.
+ * `onStep` gets a line for each step, for diagnostics.
  */
-export async function connect() {
+export async function connect({ onStep = () => {} } = {}) {
   if (!isSupported()) {
     throw new Error("USB transfer needs Web Serial and Web MIDI. Please use a Chromium-based browser (Chrome, Edge, Opera) on macOS, Windows or Linux.");
   }
 
   const existing = await grantedPort();
+  onStep(existing ? "serial port already granted to this site" : "no serial port granted to this site yet");
   if (existing) {
     try {
-      return await handshake(existing);
+      return await handshake(existing, { onStep });
     } catch (e) {
       if (e instanceof ProtocolMismatchError) throw e;
       // A stale grant, the device isn't in transfer mode: switch it
+      onStep(`no answer on the granted port: ${e.message}`);
     }
   }
 
   try {
-    await enterTransferMode();
+    await enterTransferMode({ onStep });
   } catch (e) {
     // Maybe already in transfer mode with a port this browser hasn't been granted yet
     if (e instanceof MidiPortNotFoundError && navigator.userActivation?.isActive) {
-      try { return await authorizePort(); } catch (_) { throw e; }
+      try { return await authorizePort({ onStep }); } catch (_) { throw e; }
     }
     throw e;
   }
 
+  onStep("waiting for the serial port");
   const port = await waitForPort(2500);
-  if (port) return handshake(port);
+  if (port) return handshake(port, { onStep });
   // The click that started this still counts as a user gesture for about 5 s
-  if (navigator.userActivation?.isActive) return authorizePort();
+  if (navigator.userActivation?.isActive) return authorizePort({ onStep });
   throw new NeedsAuthorizationError();
 }
 
 /** Shows the browser's port picker, so it must run from a click. The device waits up to 60 s for it. */
-export async function authorizePort() {
+export async function authorizePort({ onStep = () => {} } = {}) {
+  onStep("showing the port picker");
   const port = await navigator.serial.requestPort({ filters: [{ usbVendorId: USB_VENDOR_ID, usbProductId: USB_PRODUCT_ID }] });
-  return handshake(port);
+  return handshake(port, { onStep });
 }
 
 // WAV ////////////////////////////////////////////////////////////////////////

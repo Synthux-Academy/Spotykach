@@ -2,7 +2,7 @@
 
 Status: draft v1 (MVP)
 
-Spotykach exposes its SD card sample slots to a browser-based file manager over the rear USB-C port. The manager can list slots, upload audio (any format Chrome can decode, converted in the browser), download slots as stored, and delete slots.
+Spotykach exposes its SD card sample slots to a browser-based file manager over the rear USB-C port. The manager can list slots, upload audio (any format Chrome can decode, converted in the browser), download slots as stored, and delete slots. Since protocol 1.1 it also edits the device settings in `SK/config.txt`.
 
 This is not USB mass storage. The device switches into a dedicated **transfer mode**, in which the rear port stops being a USB MIDI device and becomes a USB CDC (virtual serial) device. The browser talks to it through Web Serial using the binary protocol below.
 
@@ -16,11 +16,13 @@ This is not USB mass storage. The device switches into a dedicated **transfer mo
 - Download a slot exactly as stored (byte-exact), saved under the original file name.
 - Delete a slot.
 - Leave transfer mode from the host, from the device, or after an inactivity timeout.
+- Read and write the settings file `SK/config.txt` (protocol 1.1, §5.6).
 - Chromium-based browsers on macOS, Windows and Linux. The page is hosted on GitHub Pages.
 
 ### Out of scope (MVP)
 - Moving or swapping slots, editing cue points, waveform display.
-- Access to `SK/config.txt`, `SK/MEM`, or whole-card backup and restore.
+- Access to `SK/MEM`, or whole-card backup and restore.
+- Applying changed settings while the device runs. They take effect from the next power-on.
 - Resuming an interrupted transfer. A failed transfer is restarted from scratch.
 - Entering transfer mode from the device.
 - Transfer mode in `DEBUG` builds, where the rear port carries the logger.
@@ -134,6 +136,8 @@ If the page gets no reply within 3 s, it reports "device did not respond (old fi
 | `0x21` | DOWNLOAD_READ | `offset u32, length u32` (≤ `MAX_CHUNK`) | `rsv u8×3, data[length]` | downloading |
 | `0x22` | DOWNLOAD_CLOSE | — | — | any |
 | `0x30` | DELETE | `tape u8, slot u8, rsv u16` | — | idle |
+| `0x40` | CONFIG_READ | — | `rsv u8×3, text[≤MAX_CHUNK]`; `NOT_FOUND` without the file | idle |
+| `0x41` | CONFIG_WRITE | `rsv u32, text[≤MAX_CHUNK]` | — | idle |
 | `0x7F` | EXIT | — | — | any |
 
 **HELLO response:**
@@ -141,7 +145,7 @@ If the page gets no reply within 3 s, it reports "device did not respond (old fi
 | Field | Type | Notes |
 |---|---|---|
 | status | u8 | |
-| proto_major, proto_minor | u8, u8 | This spec: `1.0`. The host refuses to work if the major version differs. |
+| proto_major, proto_minor | u8, u8 | This spec: `1.1`. The host refuses to work if the major version differs. Minor `1` adds CONFIG_READ / CONFIG_WRITE; with `1.0` firmware the page hides the settings. |
 | tapes, slots | u8, u8 | `6, 6` |
 | tape_names | 6 × ASCII | `"BGPRTY"` |
 | rsv | u8 ×3 | alignment |
@@ -227,7 +231,27 @@ The browser console logs every lost reply and the read size the download finishe
 
 **Delete:** `DELETE`, then `LIST`. Deleting an empty slot returns OK.
 
+**Settings:** `CONFIG_READ`, edit, `CONFIG_WRITE` (§5.6).
+
 **Throughput.** Expect roughly 400–800 KB/s, so a full 42 s slot takes about 20–40 s. The 32 KB lockstep round trip (USB FS plus SD latency) is the limit. If this is too slow, double-buffered pipelining can be added later as protocol 1.1.
+
+### 5.6 Settings file
+
+`SK/config.txt` is read once, on power-on (`Storage::_do_read_settings` → `Config::fill`). The device reads at most 32 KB of it. It is a list of key lines, each followed by a value line holding an integer. Spaces are dropped and empty lines are skipped. A line that isn't a number becomes the current key, and the device compares only its first 8 characters. A number line sets the current key, and when a key has several number lines the last one wins. Unknown keys are ignored. Keys that are missing keep their defaults:
+
+| Key | Values | Default | Meaning |
+|---|---|---|---|
+| `mid_ch_a`, `mid_ch_b` | 1–16 | 1, 2 | MIDI channel of deck A / B |
+| `mid_ps_a`, `mid_ps_b` | 0/1 | 0 | MIDI Start/Stop starts and stops the deck |
+| `pre_load` | 0/1 | 1 | load the recently loaded or saved files on power-on |
+| `slc_mn_a`, `slc_mn_b` | 0/1 | 0 | Slice mode is monophonic |
+| `cue_sm_a`, `cue_sm_b` | 0–2 | 0 | Size and cue points: `0` ignore, `1` Size snaps and Alt+Size is free, `2` Size is free and Alt+Size snaps |
+| `grt_mx_a`, `grt_mx_b` | 0–10 | 3 | initial Grit mix, in tenths |
+
+The commands carry the file as raw bytes. The firmware doesn't interpret them, so the host parses and writes the format:
+- **`CONFIG_READ`** returns the file from position 0, at most `MAX_CHUNK` bytes, read straight into the word-aligned reply. A card without the file answers `NOT_FOUND`, and the host then shows the defaults.
+- **`CONFIG_WRITE`** writes the text to `/SK/config.tmp` (creating `/SK` if needed), closes it, deletes `config.txt` and renames the temp file. It runs within one request. On any error the temp file is deleted, the old file stays and the reply is `IO`. The 4-byte reserved field keeps the text at frame offset 16, like `UPLOAD_DATA`. An empty text is allowed.
+- The package's `parseConfig` reads the file the way the firmware does and clamps values to the ranges above. `formatConfig` writes each known key's value in place of its number line, appends the keys that are missing, and keeps every other line and the file's line endings. The tests check, with the firmware's `Config::fill` built for the host (`tests/transfer/config_dump.cpp`), that the device reads back what `formatConfig` wrote.
 
 ## 6. File format
 
@@ -289,7 +313,7 @@ No libDaisy changes were needed:
 ### 7.4 Transfer service (new `src/transfer/`, added to the Makefile `CPP_SOURCES`)
 - **`protocol.h`:** constants, command and status enums, little-endian helpers, CRC-32 (table based).
 - **`link`:** CDC RX callback (USB ISR) appends to an RX buffer in SDRAM (`MAX_PAYLOAD + 12`, 32-byte aligned). It sets an overflow flag if the buffer fills. Also handles frame parsing and CRC, and builds TX frames in a second SDRAM buffer of the same size.
-- **`service`:** the session state machine (`idle`, `uploading`, `downloading`), the command handlers (§5.3), and the 10 s inactivity timer. It runs from the main loop. Each command finishes within one `process()` call; at most 32 KB of SD I/O happens per call.
+- **`service`:** the session state machine (`idle`, `uploading`, `downloading`), the command handlers (§5.3), and the 10 s inactivity timer. The settings paths (`kStorageConfigPath`, `kStorageConfigTempPath`) are in `src/memory/slots.h` and are shared with `Storage`. A leftover `config.tmp` is deleted together with the slot temp files. It runs from the main loop. Each command finishes within one `process()` call; at most 32 KB of SD I/O happens per call.
 
 ### 7.5 App, storage, UI, MIDI
 - **`USBTransfer`** (`src/transfer/usb.transfer.*`) runs the mode switch. `AppImpl` owns it and constructs it with references to `Hardware`, `Core`, `CoreUI` and `Storage`.
@@ -358,6 +382,14 @@ The page, with the package next to it, is deployed to GitHub Pages manually by `
 - **Operations:** one at a time; the other actions are disabled while one runs. The active cell shows a progress bar with phases (converting → uploading → verifying, or downloading).
 - **Errors:** a dismissible banner with a readable message for each status code.
 - **Idle keep-alive:** `PING` every 2 s while connected and no operation is running.
+- **Settings panel**, below the grid, read with `CONFIG_READ` on connect. It has a Deck A and a Deck B column:
+  - MIDI channel: a 1–16 select;
+  - MIDI Start/Stop and monophonic Slice mode: checkboxes;
+  - Size and cue points: a three-way Ignore / Snap / Free selector;
+  - initial Grit mix: a stepper from 0 to 100 % in 10 % steps;
+  - Preload: one checkbox for the whole device.
+
+  **Save to card** (`CONFIG_WRITE`) and **Revert** are enabled only while there are unsaved changes. The panel says that settings apply from the next power-on, and that saving creates the file when the card doesn't have one yet. Leaving transfer mode with unsaved changes asks for confirmation first. With 1.0 firmware the panel asks for a firmware update.
 
 ## 9. Risks and open items
 
