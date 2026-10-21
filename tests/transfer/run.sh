@@ -21,4 +21,7 @@ $OUT/card_load_test "$CARD"
 rm -rf "$CARD"
 
 echo "# protocol"
-HARNESS=$PWD/$OUT/harness CONFIG_DUMP=$PWD/$OUT/config_dump node --test transfer.test.mjs
+HARNESS=$PWD/$OUT/harness CONFIG_DUMP=$PWD/$OUT/config_dump
+
+echo "# connect"
+node --test connect.test.mjs
