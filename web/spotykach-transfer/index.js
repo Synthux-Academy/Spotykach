@@ -707,6 +707,25 @@ const ENTER_TEXT = {
   2: "No SD card found in Spotykach.",
 };
 
+// Web MIDI's calls have no time limit of their own; on some Windows machines they never settle
+const MIDI_ACCESS_MS = 8000;
+const MIDI_OPEN_MS = 5000;
+
+function within(promise, ms, message) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    promise.then(resolve, reject).finally(() => clearTimeout(timer));
+  });
+}
+
+async function midiPermission() {
+  try {
+    return (await navigator.permissions.query({ name: "midi", sysex: true })).state;
+  } catch (_) {
+    return "unknown";
+  }
+}
+
 /**
  * Asks the device over USB MIDI to switch to transfer mode and waits for its reply.
  * Both MIDI ports are opened before sending so the reply can't be missed; the
@@ -714,19 +733,21 @@ const ENTER_TEXT = {
  * device switched and only its reply got lost.
  */
 export async function enterTransferMode() {
-  let access;
-  try {
-    access = await navigator.requestMIDIAccess({ sysex: true });
-  } catch (e) {
+  const permission = await midiPermission();
+  const request = navigator.requestMIDIAccess({ sysex: true }).catch(e => {
     throw new Error("MIDI access was denied. Spotykach is switched to transfer mode through MIDI SysEx, please allow it.", { cause: e });
-  }
+  });
+  // A permission prompt waits on the user, so no time limit then
+  const access = permission === "prompt" ? await request : await within(request, MIDI_ACCESS_MS,
+    `The browser didn't give access to MIDI within ${MIDI_ACCESS_MS / 1000} s. Close other apps and tabs that use MIDI, or try another Chromium-based browser.`);
   const isSpotykach = port => /spotykach/i.test(port.name || "");
   const output = [...access.outputs.values()].find(isSpotykach);
   const inputs = [...access.inputs.values()].filter(isSpotykach);
   if (!output) throw new MidiPortNotFoundError();
 
   try {
-    await Promise.all([output.open(), ...inputs.map(input => input.open())]);
+    await within(Promise.all([output.open(), ...inputs.map(input => input.open())]), MIDI_OPEN_MS,
+      `The MIDI port didn't open within ${MIDI_OPEN_MS / 1000} s.`);
   } catch (e) {
     throw new Error("Can't open the Spotykach MIDI port." + portHint(), { cause: e });
   }

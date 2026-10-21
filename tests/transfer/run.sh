@@ -21,3 +21,6 @@ rm -rf "$CARD"
 
 echo "# protocol"
 HARNESS=$PWD/$OUT/harness node --test transfer.test.mjs
+
+echo "# connect"
+node --test connect.test.mjs
