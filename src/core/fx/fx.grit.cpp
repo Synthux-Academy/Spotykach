@@ -10,7 +10,7 @@ void Grit::init(const float sample_rate)
     _reduce.init(sample_rate);
     _filter.init(sample_rate);
     set_intensity(_drive.intensity());
-    set_mix(_drive.mix());
+    set_mix(.5f, true);
 }
 
 void Grit::switch_mode()
@@ -67,9 +67,16 @@ float Grit::mix()
         default: return 0.f;
     }
 }
-void Grit::set_mix(const float norm)
+void Grit::set_mix(const float norm, const bool all)
 {
     auto clamp = fclamp(norm, 0.0f, 1.0f);
+    if (all) {
+        _drive.set_mix(clamp);
+        _reduce.set_mix(clamp);
+        _filter.set_mix(clamp);
+        return;
+    }
+
     switch (_mode) {
         case Mode::Drive: _drive.set_mix(clamp); break;
         case Mode::Reduce: _reduce.set_mix(clamp); break;

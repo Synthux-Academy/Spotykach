@@ -12,6 +12,7 @@ public:
     struct Params {
         float sample_rate;
         float** delay_buf;
+        float grit_mix;
     };
 
     static constexpr size_t kEchoDelayBufferLength { Flux::kEchoDelayBufferLength };
@@ -44,6 +45,8 @@ private:
 
     SoftSwitch _flux_switch;
     SoftSwitch _grit_switch;
+
+    uint8_t _ref;
 
     bool _flux_on;
     bool _flux_lock;

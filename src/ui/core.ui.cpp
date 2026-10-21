@@ -1,6 +1,6 @@
 #include "core.ui.h"
 #include "Utility/dsp.h"
-#include "expose.h"
+#include "../core/config.h"
 
 using namespace spotykach;
 using namespace infrasonic;
@@ -67,6 +67,8 @@ void CoreUI::init()
 };
 void CoreUI::_init_values()
 {
+    auto& cfg = Config::dynamic();
+
     for (auto ref: { Deck::A, Deck::B }) {
         
         auto& deck = _core.deck(ref);
@@ -84,9 +86,9 @@ void CoreUI::_init_values()
         _mod_amp[ref].set(0.f);
 
         _hold_clear[ref].init();
-
+        
         auto& fx = deck.fx();
-        _grit_mix[ref].set(fx.grit().mix());
+        _grit_mix[ref].set(cfg.grit_mix(ref));
         _grit_intens[ref].set(fx.grit().intensity());
         _grit_char[ref].set(fx.grit().character());
         _flux_mix[ref].set(fx.flux().mix_norm());
