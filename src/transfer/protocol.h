@@ -10,7 +10,7 @@ All multi-byte values are little-endian.
 namespace spotykach::transfer {
 
 static constexpr uint8_t kProtoMajor = 1;
-static constexpr uint8_t kProtoMinor = 0;
+static constexpr uint8_t kProtoMinor = 1; // 1.1: config_read, config_write
 
 // SysEx trigger: F0 7D 53 4B <cmd> F7 /////////////
 static constexpr uint8_t kSysExManufacturer = 0x7D; // non-commercial
@@ -47,6 +47,8 @@ enum class Command: uint8_t {
     download_read  = 0x21,
     download_close = 0x22,
     remove         = 0x30,
+    config_read    = 0x40,
+    config_write   = 0x41,
     exit           = 0x7F
 };
 

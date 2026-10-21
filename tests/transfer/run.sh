@@ -12,6 +12,7 @@ mkdir -p $OUT
 
 $CXX $FLAGS -o $OUT/harness harness.cpp fatfs_stub.cpp \
     $SRC/transfer/service.cpp $SRC/transfer/link.cpp $SRC/hw/card.cpp $SRC/memory/wav.cpp $SRC/memory/slots.cpp
+$CXX $FLAGS -o $OUT/config_dump config_dump.cpp $SRC/core/config.cpp
 $CXX $FLAGS -o $OUT/card_load_test card_load_test.cpp fatfs_stub.cpp $SRC/hw/card.cpp $SRC/memory/wav.cpp
 
 echo "# card loader"
@@ -20,7 +21,7 @@ $OUT/card_load_test "$CARD"
 rm -rf "$CARD"
 
 echo "# protocol"
-HARNESS=$PWD/$OUT/harness node --test transfer.test.mjs
+HARNESS=$PWD/$OUT/harness CONFIG_DUMP=$PWD/$OUT/config_dump
 
 echo "# connect"
 node --test connect.test.mjs

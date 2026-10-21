@@ -16,7 +16,7 @@ export const USB_PRODUCT_ID = 0x5740;
 
 /** Protocol version this module speaks; the package major version follows the protocol major. */
 export const PROTO_MAJOR = 1;
-export const PROTO_MINOR = 0;
+export const PROTO_MINOR = 1;
 
 const SYSEX_ENTER = [0xF0, 0x7D, 0x53, 0x4B, 0x01, 0xF7];
 const SYSEX_REPLY_PREFIX = [0xF0, 0x7D, 0x53, 0x4B, 0x02];
@@ -40,6 +40,8 @@ export const CMD = Object.freeze({
   downloadRead: 0x21,
   downloadClose: 0x22,
   remove: 0x30,
+  configRead: 0x40,
+  configWrite: 0x41,
   exit: 0x7F,
 });
 
@@ -665,6 +667,38 @@ export class SkLink {
     await this.exclusive(() => this.request(CMD.remove, slotArgs(tape, slot)));
   }
 
+  /** Protocol 1.1 and up: `readConfig` / `writeConfig`. */
+  hasConfig() {
+    return !!this.info && this.info.protoMinor >= 1;
+  }
+
+  /** The text of `SK/config.txt`, null if the card has none. See `parseConfig`. */
+  readConfig() {
+    return this.exclusive(async () => {
+      try {
+        const p = await this.request(CMD.configRead);
+        return new TextDecoder().decode(p.subarray(4));
+      } catch (e) {
+        if (e instanceof DeviceError && e.status === STATUS.notFound) return null;
+        throw e;
+      }
+    });
+  }
+
+  /**
+   * Replaces `SK/config.txt`; a failed write keeps the old file. The device reads
+   * it on power-on, so the settings apply from the next start. See `formatConfig`.
+   */
+  writeConfig(text) {
+    return this.exclusive(async () => {
+      const bytes = new TextEncoder().encode(text);
+      if (bytes.length > this._maxChunk()) throw new Error(`The settings file is larger than ${this._maxChunk()} bytes.`);
+      const payload = new Uint8Array(4 + bytes.length);
+      payload.set(bytes, 4);
+      await this.request(CMD.configWrite, payload, 10000);
+    });
+  }
+
   /** Back to USB MIDI and closes the port. Best effort: the device also leaves after 10 s of silence. */
   async exit() {
     this.stopKeepAlive();
@@ -674,6 +708,90 @@ export class SkLink {
     this.onclose = null;
     await this.close();
   }
+}
+
+// Settings ///////////////////////////////////////////////////////////////////
+
+/**
+ * The keys of `SK/config.txt` the firmware knows, with the value it uses when a
+ * key is missing. The file is a key line followed by a value line (an integer).
+ */
+export const CONFIG_KEYS = Object.freeze({
+  mid_ch_a: { min: 1, max: 16, default: 1 },  // MIDI channel of deck A
+  mid_ch_b: { min: 1, max: 16, default: 2 },
+  mid_ps_a: { min: 0, max: 1, default: 0 },   // MIDI Start/Stop starts/stops deck A
+  mid_ps_b: { min: 0, max: 1, default: 0 },
+  pre_load: { min: 0, max: 1, default: 1 },   // load the recent files on power-on
+  slc_mn_a: { min: 0, max: 1, default: 0 },   // deck A slice mode is monophonic
+  slc_mn_b: { min: 0, max: 1, default: 0 },
+  cue_sm_a: { min: 0, max: 2, default: 0 },   // deck A Size and cue points, see CUE_SIZE_MODE
+  cue_sm_b: { min: 0, max: 2, default: 0 },
+  grt_mx_a: { min: 0, max: 10, default: 3 },  // deck A initial Grit mix, tenths
+  grt_mx_b: { min: 0, max: 10, default: 3 },
+});
+
+/** `cue_sm_a` / `cue_sm_b` values */
+export const CUE_SIZE_MODE = Object.freeze({
+  ignore: 0, // Size ignores cue points
+  snap: 1,   // Size snaps to cue points, Alt+Size is free
+  free: 2,   // Size is free, Alt+Size snaps to cue points
+});
+
+const CONFIG_KEY_LENGTH = 8; // the device compares the first 8 characters, spaces removed
+const isConfigNumber = line => /^-?[0-9]*$/.test(line) && line.length > 0;
+
+/* The file's lines the way the device reads them: spaces dropped, empty lines skipped. */
+function configLines(text) {
+  return (text || "").split(/\r\n|\r|\n/).map(raw => {
+    const line = raw.replace(/ /g, "");
+    return { raw, line, isValue: isConfigNumber(line), key: line.slice(0, CONFIG_KEY_LENGTH) };
+  });
+}
+
+/**
+ * The settings in `SK/config.txt` as `{ key: value }` for every CONFIG_KEYS key,
+ * read like the device does; missing keys get their default. Values outside a
+ * key's range are clamped, the way the settings page shows them.
+ */
+export function parseConfig(text) {
+  const values = Object.fromEntries(Object.entries(CONFIG_KEYS).map(([key, spec]) => [key, spec.default]));
+  let key = null;
+  for (const { line, isValue, key: lineKey } of configLines(text)) {
+    if (!line) continue;
+    if (!isValue) { key = lineKey; continue; }
+    const spec = Object.hasOwn(CONFIG_KEYS, key) ? CONFIG_KEYS[key] : null;
+    if (spec) values[key] = Math.min(spec.max, Math.max(spec.min, parseInt(line, 10) || 0));
+  }
+  return values;
+}
+
+/**
+ * `text` (the current file, or null) with the given settings written into it:
+ * known keys get their value in place, missing ones are appended, and other
+ * lines (unknown keys, notes) stay as they were.
+ */
+export function formatConfig(values, text = null) {
+  const lines = configLines(text);
+  const eol = /\r\n/.test(text || "") ? "\r\n" : "\n";
+  const isKnown = key => Object.hasOwn(CONFIG_KEYS, key) && Object.hasOwn(values, key);
+  const written = new Set();
+  const out = [];
+  let key = null;
+  for (const { raw, line, isValue, key: lineKey } of lines) {
+    if (line && !isValue) key = lineKey;
+    if (line && isValue && isKnown(key)) {
+      // Repeated value lines: the device takes the last one, write it once
+      if (!written.has(key)) out.push(String(values[key]));
+      written.add(key);
+      continue;
+    }
+    out.push(raw);
+  }
+  while (out.length && out[out.length - 1] === "") out.pop();
+  for (const key of Object.keys(CONFIG_KEYS)) {
+    if (isKnown(key) && !written.has(key)) out.push(key, String(values[key]));
+  }
+  return out.join(eol) + eol;
 }
 
 // Connecting /////////////////////////////////////////////////////////////////

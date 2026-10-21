@@ -9,6 +9,7 @@ on:
       - src/hw/card.*
       - src/memory/wav.*
       - src/memory/slots.*
+      - src/core/config.*
       - web/spotykach-transfer/**
       - tests/transfer/**
       - .github/workflows/transfer-tests.yml
@@ -18,6 +19,7 @@ on:
       - src/hw/card.*
       - src/memory/wav.*
       - src/memory/slots.*
+      - src/core/config.*
       - web/spotykach-transfer/**
       - tests/transfer/**
       - .github/workflows/transfer-tests.yml

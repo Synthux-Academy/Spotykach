@@ -2,17 +2,20 @@
 // over a fake Web Serial port. Run through run.sh.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
   SkLink, CMD, STATUS, FRAME_ERROR, DeviceError, SLOT_OCCUPIED, SLOT_LOADABLE, SLOT_PARSED,
   crc32, encodeWav, inspectWav, checkUploadable,
+  CONFIG_KEYS, parseConfig, formatConfig,
 } from "../../web/spotykach-transfer/index.js";
 
 const HARNESS = process.env.HARNESS;
 assert.ok(HARNESS, "HARNESS must point to the built harness, use run.sh");
+const CONFIG_DUMP = process.env.CONFIG_DUMP;
+assert.ok(CONFIG_DUMP, "CONFIG_DUMP must point to the built config_dump, use run.sh");
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -308,4 +311,85 @@ test("encodeWav: audio 4-byte aligned for every name length, inspectWav reads it
   const mono = wav.slice();
   new DataView(mono.buffer).setUint16(22, 1, true);
   assert.match(checkUploadable(mono)[0], /stereo/);
+});
+
+// Settings ///////////////////////////////////////////////////////////////////
+
+const DEFAULTS = Object.fromEntries(Object.entries(CONFIG_KEYS).map(([k, spec]) => [k, spec.default]));
+
+// What the firmware's Config::fill reads from the text
+function deviceReads(text) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sk-config-"));
+  const file = path.join(dir, "config.txt");
+  fs.writeFileSync(file, text);
+  try {
+    return JSON.parse(execFileSync(CONFIG_DUMP, [file], { encoding: "utf8" }));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("settings: read, write and read back through the device", async () => {
+  const device = await startDevice();
+  const { link } = device;
+  assert.ok(link.hasConfig());
+  assert.equal(await link.readConfig(), null);
+
+  const values = { ...parseConfig(null), mid_ch_a: 16, mid_ps_b: 1, cue_sm_a: 2, grt_mx_b: 10 };
+  const text = formatConfig(values, null);
+  await link.writeConfig(text);
+  assert.equal(fs.readFileSync(path.join(device.root, "SK/config.txt"), "utf8"), text);
+  assert.ok(!fs.existsSync(path.join(device.root, "SK/config.tmp")));
+  assert.equal(await link.readConfig(), text);
+  assert.deepEqual(parseConfig(await link.readConfig()), values);
+
+  // Replaced, not appended to
+  await link.writeConfig("pre_load\n0\n");
+  assert.equal(await link.readConfig(), "pre_load\n0\n");
+  await link.writeConfig("");
+  assert.equal(await link.readConfig(), "");
+
+  await assert.rejects(link.writeConfig("x".repeat(link.info.maxChunk + 1)), /larger than/);
+  // Not during another session
+  const begin = new Uint8Array(12);
+  new DataView(begin.buffer).setUint32(4, 100, true);
+  await link.request(CMD.uploadBegin, begin);
+  await assert.rejects(link.readConfig(), e => e instanceof DeviceError && e.status === STATUS.badState);
+  await link.request(CMD.uploadAbort);
+  await device.stop();
+});
+
+test("settings: the firmware reads what formatConfig writes", () => {
+  assert.deepEqual(deviceReads(""), DEFAULTS);
+  assert.deepEqual(deviceReads(formatConfig(DEFAULTS)), DEFAULTS);
+  const values = {
+    mid_ch_a: 10, mid_ch_b: 16, mid_ps_a: 1, mid_ps_b: 0, pre_load: 0,
+    slc_mn_a: 0, slc_mn_b: 1, cue_sm_a: 1, cue_sm_b: 2, grt_mx_a: 0, grt_mx_b: 7,
+  };
+  assert.deepEqual(deviceReads(formatConfig(values)), values);
+  assert.deepEqual(parseConfig(formatConfig(values)), values);
+  for (let mix = 0; mix <= 10; mix++) {
+    assert.equal(deviceReads(formatConfig({ ...values, grt_mx_a: mix })).grt_mx_a, mix);
+  }
+});
+
+test("settings: parseConfig reads files like the firmware, formatConfig keeps their other lines", () => {
+  const file = "mid_ch_a\r\n 1 2 \r\n\r\nmy_note\r\n42\r\ncue_sm_b\r\n1\r\n2\r\nmid_ch_a\r\n";
+  const read = parseConfig(file);
+  assert.equal(read.mid_ch_a, 12); // spaces dropped
+  assert.equal(read.cue_sm_b, 2);  // the last value wins
+  assert.deepEqual(read, { ...DEFAULTS, mid_ch_a: 12, cue_sm_b: 2 });
+  assert.deepEqual(deviceReads(file), read);
+
+  // Out of range: clamped for the page
+  assert.equal(parseConfig("mid_ch_b\n40\ngrt_mx_a\n-3\n").mid_ch_b, 16);
+  assert.equal(parseConfig("grt_mx_a\n-3\n").grt_mx_a, 0);
+  assert.equal(parseConfig("toString\n1\n").toString, Object.prototype.toString);
+
+  const written = formatConfig({ ...read, mid_ch_a: 3, cue_sm_b: 0, pre_load: 0 }, file);
+  assert.ok(written.includes("my_note\r\n42\r\n"), "unknown keys stay");
+  assert.equal(written.split("\r\n").filter(l => l === "mid_ch_a").length, 2, "key lines stay");
+  assert.deepEqual(deviceReads(written), { ...read, mid_ch_a: 3, cue_sm_b: 0, pre_load: 0 });
+  assert.deepEqual(parseConfig(written), { ...read, mid_ch_a: 3, cue_sm_b: 0, pre_load: 0 });
+  assert.ok(!/[^\r]\n/.test(written), "line endings stay");
 });

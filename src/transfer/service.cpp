@@ -139,6 +139,16 @@ void Service::_handle(const Link::Frame& frame)
             else _remove(frame);
             break;
 
+        case Command::config_read:
+            if (session != Session::idle) _reply(frame, Status::bad_state);
+            else _config_read(frame);
+            break;
+
+        case Command::config_write:
+            if (session != Session::idle) _reply(frame, Status::bad_state);
+            else _config_write(frame);
+            break;
+
         case Command::exit:
             _reset_session();
             _reply(frame, Status::ok);
@@ -185,6 +195,7 @@ void Service::_remove_temp_files()
             _card->remove(path);
         }
     }
+    _card->remove(kStorageConfigTempPath);
 }
 
 // HELLO ///////////////////////////////////////////
@@ -513,4 +524,64 @@ void Service::_remove(const Link::Frame& frame)
     char path[16];
     storage_slot_path(tape, slot, kWavExt, path);
     _reply(frame, _card->remove(path) ? Status::ok : Status::io);
+}
+
+// CONFIG //////////////////////////////////////////
+/* The settings file as text, up to a chunk: the device reads no more on power-on. */
+void Service::_config_read(const Link::Frame& frame)
+{
+    uint32_t size = 0;
+    if (!_card->stat(kStorageConfigPath, size)) {
+        _reply(frame, Status::not_found);
+        return;
+    }
+    auto p = _link.payload();
+    size_t got = 0;
+    auto length = std::min(size, (uint32_t)kMaxChunk);
+    // Read from position 0 into the word-aligned payload, see _download_read()
+    auto is_read = _card->open_read(kStorageConfigPath, size) && _card->read(&p[4], length, got);
+    _card->close();
+    if (!is_read || got != length) {
+        _reply(frame, Status::io);
+        return;
+    }
+    p[0] = static_cast<uint8_t>(Status::ok);
+    p[1] = p[2] = p[3] = 0;
+    _link.send(frame.type | kResponseFlag, frame.seq, 4 + length);
+}
+
+/* Replaces the settings file through the temp file, so a failed write keeps the old one. */
+void Service::_config_write(const Link::Frame& frame)
+{
+    if (frame.size < 4 || frame.size - 4 > kMaxChunk) {
+        _reply(frame, Status::bad_arg);
+        return;
+    }
+    auto data = &frame.payload[4];
+    auto length = frame.size - 4;
+
+    uint32_t total_kib, free_kib;
+    if (!_card->space_kib(total_kib, free_kib)) {
+        _reply(frame, Status::no_card);
+        return;
+    }
+    if ((uint64_t)free_kib * 1024 < length + 32768) {
+        _reply(frame, Status::no_space);
+        return;
+    }
+
+    char root[8];
+    storage_root_path(root);
+    auto is_written = _card->make_dir(root)
+        && _card->open_write(kStorageConfigTempPath)
+        && (length == 0 || _card->write(data, length));
+    is_written = _card->close() && is_written;
+    if (!is_written
+        || !_card->remove(kStorageConfigPath)
+        || !_card->rename(kStorageConfigTempPath, kStorageConfigPath)) {
+        _card->remove(kStorageConfigTempPath);
+        _reply(frame, Status::io);
+        return;
+    }
+    _reply(frame, Status::ok);
 }

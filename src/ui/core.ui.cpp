@@ -88,6 +88,7 @@ void CoreUI::_init_values()
         _hold_clear[ref].init();
         
         auto& fx = deck.fx();
+        fx.grit().set_mix(cfg.grit_mix(ref), true);
         _grit_mix[ref].set(cfg.grit_mix(ref));
         _grit_intens[ref].set(fx.grit().intensity());
         _grit_char[ref].set(fx.grit().character());

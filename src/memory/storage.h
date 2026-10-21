@@ -11,7 +11,6 @@
 
 namespace spotykach {
 
-static const std::string kConfig = "SK/config.txt";
 static const std::string kMemory = "SK/MEM";
 
 class Storage;
@@ -305,7 +304,7 @@ class Storage {
         {
             uint8_t* data = nullptr;
             size_t size = 0;
-            _card.read_file((char*)kConfig.c_str(), data, &size);
+            _card.read_file(kStorageConfigPath, data, &size);
             Config::dynamic().fill(data, size);
         }
 

@@ -12,7 +12,6 @@ public:
     struct Params {
         float sample_rate;
         float** delay_buf;
-        float grit_mix;
     };
 
     static constexpr size_t kEchoDelayBufferLength { Flux::kEchoDelayBufferLength };
