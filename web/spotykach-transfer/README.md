@@ -4,7 +4,8 @@ Host side of the Spotykach USB sample transfer protocol, for web apps in Chromiu
 
 - switches the device into transfer mode over USB MIDI (SysEx);
 - talks to it over Web Serial: lists, uploads, downloads and deletes the 36 sample slots;
-- prepares audio the way the device loads it (48 kHz stereo 32-bit float WAV with the name and cue points).
+- prepares audio the way the device loads it (48 kHz stereo 32-bit float WAV with the name and cue points);
+- reads and writes the device settings in `SK/config.txt` (protocol 1.1).
 
 It lives in the [Spotykach firmware repository](https://github.com/Synthux-Academy/Spotykach) next to the firmware side (`src/transfer/`), so both sides change together. [`docs/usb-transfer.md`](../../docs/usb-transfer.md) describes the protocol.
 
@@ -21,6 +22,7 @@ It's a single framework-free ES module with TypeScript types and no dependencies
 ```js
 import {
   connect, authorizePort, NeedsAuthorizationError, convertAudio, SLOT_OCCUPIED,
+  parseConfig, formatConfig,
 } from "@synthuxacademy/spotykach-transfer";
 
 // From a click
@@ -46,6 +48,13 @@ const wav = await link.download(tape, slot);
 const head = await link.readSlot(tape, slot, async (size, read) => read(0, 4096));
 
 await link.remove(tape, slot);
+
+// Settings (protocol 1.1, check link.hasConfig()): read on power-on, so they apply from the next start
+const text = await link.readConfig();     // null without a config.txt
+const settings = parseConfig(text);        // { mid_ch_a: 1, ..., grt_mx_b: 3 }, defaults filled in
+settings.mid_ch_a = 5;
+await link.writeConfig(formatConfig(settings, text)); // keeps the file's other lines
+
 await link.exit(); // back to USB MIDI
 ```
 
@@ -58,6 +67,7 @@ await link.exit(); // back to USB MIDI
 - **Ranges.** `readSlot` ranges may start anywhere. The device reads only from multiples of `SECTOR_SIZE` (512), so a range is read from the boundary below and trimmed.
 - **Recovery.** Uploads resend chunks after a corrupted frame or a lost reply. A frame the device rejected comes back as `DeviceError` with `frameError` set to the reason (`FRAME_ERROR`): checksum mismatch, a request that stopped arriving, an overflowing buffer or an invalid length. Downloads adapt their read size to serial drivers that drop large bursts (macOS); the size that worked is remembered in `localStorage`.
 - **Format check.** `upload()` checks the file first (`checkUploadable`): 48 kHz stereo 32-bit float, within `maxFrames` and `maxCues`. `encodeWav` writes files the device reads fastest, with the audio 4-byte aligned.
+- **Settings.** `CONFIG_KEYS` lists the keys with their range and default; `CUE_SIZE_MODE` names the `cue_sm_*` values. `parseConfig` reads the file the way the firmware does. Firmware with protocol 1.0 doesn't have the settings commands: `readConfig` fails with `STATUS.unknownCmd` there.
 - **Windows.** Only one app can open a MIDI port at a time, so close the DAW before connecting.
 - **Linux.** Web Serial needs the user in the `dialout` group (`uucp` on Arch).
 
@@ -68,6 +78,7 @@ The major version follows the protocol major version (`PROTO_MAJOR`), so `1.x` t
 | Package | Protocol | Firmware |
 |---|---|---|
 | 1.0.1 | 1.0 | `uploader` branch, first release with USB transfer |
+| 1.1.0 | 1.1 | settings (`readConfig`, `writeConfig`); works with 1.0 firmware except for those |
 
 ## Development
 

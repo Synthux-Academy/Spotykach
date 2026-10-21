@@ -11,6 +11,11 @@ Shared by both decks.
 static constexpr uint8_t kStorageTapeCount = 6;
 static constexpr uint8_t kStorageSlotCount = 6;
 
+/* Settings, read on power-on (Config::fill). Written by the transfer service
+through the temp file. */
+static constexpr const char* kStorageConfigPath = "/SK/config.txt";
+static constexpr const char* kStorageConfigTempPath = "/SK/config.tmp";
+
 const char* storage_root_dir();                     // "SK"
 const char* storage_tape_name(const uint8_t tape_idx); // "B", "G", ...
 const char* storage_slot_name(const uint8_t slot_idx); // "1" ... "6"
