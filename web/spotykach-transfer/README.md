@@ -54,6 +54,7 @@ await link.exit(); // back to USB MIDI
 ### Notes
 
 - **Request order.** Requests run one at a time. Operations made of several requests (upload, download, `readSlot`, `hello`) don't interleave, and `link.exclusive(work)` runs your own sequence the same way.
+- **Diagnostics.** `connect({ onStep })` and `authorizePort({ onStep })` call `onStep(line)` for each step: MIDI permission and ports, SysEx and reply, serial port, HELLO. Web MIDI access gives up after 8 s and opening its ports after 5 s, so a step that hangs ends in an error that names it.
 - **Keep-alive.** The device leaves transfer mode after 10 s without a request. `connect()` starts a keep-alive that pings while the link is otherwise idle.
 - **Ranges.** `readSlot` ranges may start anywhere. The device reads only from multiples of `SECTOR_SIZE` (512), so a range is read from the boundary below and trimmed.
 - **Recovery.** Uploads resend chunks after a corrupted frame or a lost reply. A frame the device rejected comes back as `DeviceError` with `frameError` set to the reason (`FRAME_ERROR`): checksum mismatch, a request that stopped arriving, an overflowing buffer or an invalid length. Downloads adapt their read size to serial drivers that drop large bursts (macOS); the size that worked is remembered in `localStorage`.

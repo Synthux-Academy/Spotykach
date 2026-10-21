@@ -49,3 +49,31 @@ test("a MIDI port that never opens times out", async () => {
   mock.timers.tick(5000);
   await result;
 });
+
+test("each step of a switch is reported", async () => {
+  const input = spotykachPort("input");
+  const reply = () => input.onmidimessage({ data: [0xF0, 0x7D, 0x53, 0x4B, 0x02, 0, 0xF7] });
+  const output = { ...spotykachPort("output"), send: () => queueMicrotask(reply) };
+  fakeNavigator({ access: Promise.resolve(midiAccess([input, output])) });
+  const steps = [];
+  await enterTransferMode({ onStep: line => steps.push(line) });
+  assert.deepEqual(steps, [
+    "MIDI permission: granted",
+    'MIDI ports: input "Spotykach" (connected), output "Spotykach" (connected)',
+    "sending SysEx: enter transfer mode",
+    "reply: OK",
+  ]);
+});
+
+test("a MIDI access that comes after the time limit is reported", async () => {
+  let grant;
+  fakeNavigator({ access: new Promise(resolve => { grant = resolve; }) });
+  const steps = [];
+  const result = assert.rejects(enterTransferMode({ onStep: line => steps.push(line) }), /within 8 s/);
+  await flush();
+  mock.timers.tick(8000);
+  await result;
+  grant(midiAccess([]));
+  await flush();
+  assert.match(steps.at(-1), /^MIDI access came late, after \d+\.\d s$/);
+});

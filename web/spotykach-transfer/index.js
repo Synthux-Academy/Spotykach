@@ -711,9 +711,9 @@ const ENTER_TEXT = {
 const MIDI_ACCESS_MS = 8000;
 const MIDI_OPEN_MS = 5000;
 
-function within(promise, ms, message) {
+function within(promise, ms, message, onTimeout) {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(message)), ms);
+    const timer = setTimeout(() => { onTimeout?.(); reject(new Error(message)); }, ms);
     promise.then(resolve, reject).finally(() => clearTimeout(timer));
   });
 }
@@ -731,15 +731,23 @@ async function midiPermission() {
  * Both MIDI ports are opened before sending so the reply can't be missed; the
  * request is sent twice at most. A MIDI port that disappears meanwhile means the
  * device switched and only its reply got lost.
+ * `onStep` gets a line for each step, for diagnostics.
  */
-export async function enterTransferMode() {
+export async function enterTransferMode({ onStep = () => {} } = {}) {
   const permission = await midiPermission();
+  onStep(`MIDI permission: ${permission}`);
+  const asked = now();
+  const after = () => `after ${((now() - asked) / 1000).toFixed(1)} s`;
   const request = navigator.requestMIDIAccess({ sysex: true }).catch(e => {
     throw new Error("MIDI access was denied. Spotykach is switched to transfer mode through MIDI SysEx, please allow it.", { cause: e });
   });
   // A permission prompt waits on the user, so no time limit then
   const access = permission === "prompt" ? await request : await within(request, MIDI_ACCESS_MS,
-    `The browser didn't give access to MIDI within ${MIDI_ACCESS_MS / 1000} s. Close other apps and tabs that use MIDI, or try another Chromium-based browser.`);
+    `The browser didn't give access to MIDI within ${MIDI_ACCESS_MS / 1000} s. Close other apps and tabs that use MIDI, or try another Chromium-based browser.`,
+    // Tells a slow MIDI access from one that never comes
+    () => request.then(() => onStep(`MIDI access came late, ${after()}`), e => onStep(`MIDI access failed late, ${after()}: ${e.cause?.message}`)));
+  const ports = [...access.inputs.values(), ...access.outputs.values()];
+  onStep(`MIDI ports: ${ports.map(p => `${p.type} "${p.name}" (${p.state})`).join(", ") || "none"}`);
   const isSpotykach = port => /spotykach/i.test(port.name || "");
   const output = [...access.outputs.values()].find(isSpotykach);
   const inputs = [...access.inputs.values()].filter(isSpotykach);
@@ -762,12 +770,17 @@ export async function enterTransferMode() {
       onReply();
     };
   }
-  const switched = () => output.state === "disconnected";
+  const switched = () => {
+    if (output.state !== "disconnected") return false;
+    onStep("the MIDI port is gone: the device switched");
+    return true;
+  };
 
   try {
     for (let attempt = 0; attempt < 2 && status === null; attempt++) {
       if (switched()) return;
       try {
+        onStep(`sending SysEx: enter transfer mode${attempt ? ", again" : ""}`);
         output.send(SYSEX_ENTER);
       } catch (e) {
         if (switched()) return;
@@ -787,14 +800,17 @@ export async function enterTransferMode() {
     if (switched()) return;
     throw new Error("Spotykach didn't respond. Its firmware may not support USB transfer." + portHint());
   }
+  onStep(`reply: ${status === 0 ? "OK" : status}`);
   if (status !== 0) throw new Error(ENTER_TEXT[status] || `Spotykach refused transfer mode (${status}).`);
 }
 
 /** Opens the port and checks HELLO. Resolves to `{ link, info }`, with the keep-alive running. */
-export async function handshake(port) {
+export async function handshake(port, { onStep = () => {} } = {}) {
+  onStep("opening the serial port and sending HELLO");
   const link = await SkLink.open(port);
   try {
     const info = await link.hello();
+    onStep(`HELLO: firmware ${info.firmware}, protocol ${info.protoMajor}.${info.protoMinor}`);
     if (info.protoMajor !== PROTO_MAJOR) {
       await link.exit();
       throw new ProtocolMismatchError(info.protoMajor, info.protoMinor);
@@ -812,43 +828,48 @@ export async function handshake(port) {
  * a reload), otherwise switches the device and waits for its serial port.
  * On first use, once the click that started this has expired, throws
  * `NeedsAuthorizationError`: call `authorizePort()` from a fresh click.
+ * `onStep` gets a line for each step, for diagnostics.
  */
-export async function connect() {
+export async function connect({ onStep = () => {} } = {}) {
   if (!isSupported()) {
     throw new Error("USB transfer needs Web Serial and Web MIDI. Please use a Chromium-based browser (Chrome, Edge, Opera) on macOS, Windows or Linux.");
   }
 
   const existing = await grantedPort();
+  onStep(existing ? "serial port already granted to this site" : "no serial port granted to this site yet");
   if (existing) {
     try {
-      return await handshake(existing);
+      return await handshake(existing, { onStep });
     } catch (e) {
       if (e instanceof ProtocolMismatchError) throw e;
       // A stale grant, the device isn't in transfer mode: switch it
+      onStep(`no answer on the granted port: ${e.message}`);
     }
   }
 
   try {
-    await enterTransferMode();
+    await enterTransferMode({ onStep });
   } catch (e) {
     // Maybe already in transfer mode with a port this browser hasn't been granted yet
     if (e instanceof MidiPortNotFoundError && navigator.userActivation?.isActive) {
-      try { return await authorizePort(); } catch (_) { throw e; }
+      try { return await authorizePort({ onStep }); } catch (_) { throw e; }
     }
     throw e;
   }
 
+  onStep("waiting for the serial port");
   const port = await waitForPort(2500);
-  if (port) return handshake(port);
+  if (port) return handshake(port, { onStep });
   // The click that started this still counts as a user gesture for about 5 s
-  if (navigator.userActivation?.isActive) return authorizePort();
+  if (navigator.userActivation?.isActive) return authorizePort({ onStep });
   throw new NeedsAuthorizationError();
 }
 
 /** Shows the browser's port picker, so it must run from a click. The device waits up to 60 s for it. */
-export async function authorizePort() {
+export async function authorizePort({ onStep = () => {} } = {}) {
+  onStep("showing the port picker");
   const port = await navigator.serial.requestPort({ filters: [{ usbVendorId: USB_VENDOR_ID, usbProductId: USB_PRODUCT_ID }] });
-  return handshake(port);
+  return handshake(port, { onStep });
 }
 
 // WAV ////////////////////////////////////////////////////////////////////////

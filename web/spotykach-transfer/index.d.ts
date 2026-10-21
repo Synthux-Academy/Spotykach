@@ -141,11 +141,15 @@ export interface Connection {
 
 export declare function isSupported(): boolean;
 export declare function grantedPort(): Promise<SerialPortLike | null>;
-export declare function enterTransferMode(): Promise<void>;
-export declare function handshake(port: SerialPortLike): Promise<Connection>;
+/** `onStep` gets a line for each connection step, for diagnostics. */
+export interface ConnectOptions {
+  onStep?: (line: string) => void;
+}
+export declare function enterTransferMode(options?: ConnectOptions): Promise<void>;
+export declare function handshake(port: SerialPortLike, options?: ConnectOptions): Promise<Connection>;
 /** Throws `NeedsAuthorizationError` on first use once the click expired; then call `authorizePort()` from a click. */
-export declare function connect(): Promise<Connection>;
-export declare function authorizePort(): Promise<Connection>;
+export declare function connect(options?: ConnectOptions): Promise<Connection>;
+export declare function authorizePort(options?: ConnectOptions): Promise<Connection>;
 
 export interface WavInfo {
   audioFormat: number;
