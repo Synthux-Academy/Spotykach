@@ -18,7 +18,7 @@ export declare const CMD: Readonly<{
   hello: 0x01; ping: 0x02; list: 0x03;
   uploadBegin: 0x10; uploadData: 0x11; uploadCommit: 0x12; uploadAbort: 0x13;
   downloadOpen: 0x20; downloadRead: 0x21; downloadClose: 0x22;
-  remove: 0x30; configRead: 0x40; configWrite: 0x41; exit: 0x7F;
+  remove: 0x30; configRead: 0x40; configWrite: 0x41; fileRead: 0x42; fileWrite: 0x43; exit: 0x7F;
 }>;
 
 export declare const STATUS: Readonly<{
@@ -134,6 +134,12 @@ export declare class SkLink {
   readConfig(): Promise<string | null>;
   /** Replaces `SK/config.txt` atomically. The device reads it on power-on. Requires `hello()` first. */
   writeConfig(text: string): Promise<void>;
+  /** Protocol 1.2 and up (firmware with file support): readFile / writeFile work. */
+  hasFiles(): boolean;
+  /** A small text file (`isFileName`), null when the card has none. */
+  readFile(name: string): Promise<string | null>;
+  /** Creates or replaces a small text file (`isFileName`), at most `MAX_FILE_SIZE` bytes. Requires `hello()` first. */
+  writeFile(name: string, text: string): Promise<void>;
   /** Back to USB MIDI, then closes the port. */
   exit(): Promise<void>;
   /** Closes the port without telling the device. */
@@ -197,3 +203,8 @@ export declare const CUE_SIZE_MODE: Readonly<{ ignore: 0; snap: 1; free: 2 }>;
 export declare function parseConfig(text: string | null): ConfigValues;
 /** `text` with the values written in; unknown keys and other lines are kept, missing keys appended. */
 export declare function formatConfig(values: Partial<ConfigValues>, text?: string | null): string;
+
+/** The largest file `readFile` / `writeFile` handle (32 KB less the path field). */
+export declare const MAX_FILE_SIZE: number;
+/** `NAME.EXT` or `SK/NAME.EXT`, with a .txt, .md or .json extension: a file the device reads and writes. */
+export declare function isFileName(name: string): boolean;

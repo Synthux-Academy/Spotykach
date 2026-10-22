@@ -149,6 +149,16 @@ void Service::_handle(const Link::Frame& frame)
             else _config_write(frame);
             break;
 
+        case Command::file_read:
+            if (session != Session::idle) _reply(frame, Status::bad_state);
+            else _file_read(frame);
+            break;
+
+        case Command::file_write:
+            if (session != Session::idle) _reply(frame, Status::bad_state);
+            else _file_write(frame);
+            break;
+
         case Command::exit:
             _reset_session();
             _reply(frame, Status::ok);
@@ -196,6 +206,7 @@ void Service::_remove_temp_files()
         }
     }
     _card->remove(kStorageConfigTempPath);
+    _card->remove(kStorageFileTempPath);
 }
 
 // HELLO ///////////////////////////////////////////
@@ -580,6 +591,120 @@ void Service::_config_write(const Link::Frame& frame)
         || !_card->remove(kStorageConfigPath)
         || !_card->rename(kStorageConfigTempPath, kStorageConfigPath)) {
         _card->remove(kStorageConfigTempPath);
+        _reply(frame, Status::io);
+        return;
+    }
+    _reply(frame, Status::ok);
+}
+
+/* `ext` equals `lower`, ignoring the case of `ext`. */
+static bool is_ext(const char* ext, const char* lower)
+{
+    for (; *ext && *lower; ext++, lower++) {
+        auto c = (*ext >= 'A' && *ext <= 'Z') ? static_cast<char>(*ext + ('a' - 'A')) : *ext;
+        if (c != *lower) return false;
+    }
+    return *ext == *lower;
+}
+
+/*
+The path in a FILE_READ / FILE_WRITE request, as "/NAME.EXT" or "/SK/NAME.EXT". Only
+small text files are reachable this way: letters, digits, '_', '-' and '.' in the
+name, and a .txt, .md or .json extension. So the slots, SK/MEM, the tape folders and
+the temp files stay out of reach. False when the field isn't such a path.
+*/
+static bool file_path(const uint8_t* field, char* out_path)
+{
+    auto name = reinterpret_cast<const char*>(field);
+    size_t length = 0;
+    while (length < kFileNameSize && name[length] != 0) length++;
+    if (length == 0 || length == kFileNameSize) return false;
+
+    auto base = name;
+    if (strncmp(name, "SK/", 3) == 0) base += 3;
+    if (base[0] == '\0' || base[0] == '.') return false;
+    const char* dot = nullptr;
+    for (auto c = base; *c; c++) {
+        auto ok = (*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') || (*c >= '0' && *c <= '9')
+            || *c == '_' || *c == '-' || *c == '.';
+        if (!ok) return false;
+        if (*c == '.') dot = c;
+    }
+    if (!dot) return false;
+    auto ext = dot + 1;
+    if (!is_ext(ext, "txt") && !is_ext(ext, "md") && !is_ext(ext, "json")) return false;
+
+    out_path[0] = '/';
+    memcpy(out_path + 1, name, length + 1);
+    return true;
+}
+
+void Service::_file_read(const Link::Frame& frame)
+{
+    char path[kFileNameSize + 1];
+    if (frame.size < kFileNameSize || !file_path(frame.payload, path)) {
+        _reply(frame, Status::bad_arg);
+        return;
+    }
+    uint32_t size = 0;
+    if (!_card->stat(path, size)) {
+        _reply(frame, Status::not_found);
+        return;
+    }
+    if (size > kMaxFileSize) {
+        _reply(frame, Status::too_large);
+        return;
+    }
+    auto p = _link.payload();
+    size_t got = 0;
+    // Read from position 0 into the word-aligned payload, see _download_read()
+    auto is_read = _card->open_read(path, size) && _card->read(&p[4], size, got);
+    _card->close();
+    if (!is_read || got != size) {
+        _reply(frame, Status::io);
+        return;
+    }
+    p[0] = static_cast<uint8_t>(Status::ok);
+    p[1] = p[2] = p[3] = 0;
+    _link.send(frame.type | kResponseFlag, frame.seq, 4 + size);
+}
+
+/* Replaces the file through the temp file, so a failed write keeps the old one. */
+void Service::_file_write(const Link::Frame& frame)
+{
+    char path[kFileNameSize + 1];
+    if (frame.size < kFileNameSize || !file_path(frame.payload, path)) {
+        _reply(frame, Status::bad_arg);
+        return;
+    }
+    auto data = &frame.payload[kFileNameSize];
+    auto length = frame.size - kFileNameSize;
+    if (length > kMaxFileSize) {
+        _reply(frame, Status::too_large);
+        return;
+    }
+
+    uint32_t total_kib, free_kib;
+    if (!_card->space_kib(total_kib, free_kib)) {
+        _reply(frame, Status::no_card);
+        return;
+    }
+    if ((uint64_t)free_kib * 1024 < length + 32768) {
+        _reply(frame, Status::no_space);
+        return;
+    }
+
+    // The temp file is in /SK, so /SK must exist even for a file at the root
+    char root[8];
+    storage_root_path(root);
+    auto is_written = _card->make_dir(root)
+        && _card->open_write(kStorageFileTempPath)
+        && (length == 0 || _card->write(data, length));
+    is_written = _card->close() && is_written;
+    if (!is_written
+        || !_card->remove(path)
+        || !_card->rename(kStorageFileTempPath, path)) {
+        _card->remove(kStorageFileTempPath);
         _reply(frame, Status::io);
         return;
     }

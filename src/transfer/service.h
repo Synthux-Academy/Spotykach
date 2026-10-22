@@ -51,6 +51,8 @@ class Service {
     void _remove(const Link::Frame&);
     void _config_read(const Link::Frame&);
     void _config_write(const Link::Frame&);
+    void _file_read(const Link::Frame&);
+    void _file_write(const Link::Frame&);
 
     size_t _list_entry(const uint8_t tape, const uint8_t slot, uint8_t* out);
     Status _validate_upload();

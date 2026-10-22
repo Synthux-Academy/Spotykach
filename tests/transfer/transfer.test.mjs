@@ -9,7 +9,7 @@ import path from "node:path";
 import {
   SkLink, CMD, STATUS, FRAME_ERROR, DeviceError, SLOT_OCCUPIED, SLOT_LOADABLE, SLOT_PARSED,
   crc32, encodeWav, inspectWav, checkUploadable,
-  CONFIG_KEYS, parseConfig, formatConfig,
+  CONFIG_KEYS, parseConfig, formatConfig, MAX_FILE_SIZE, isFileName,
 } from "../../web/spotykach-transfer/index.js";
 
 const HARNESS = process.env.HARNESS;
@@ -311,6 +311,87 @@ test("encodeWav: audio 4-byte aligned for every name length, inspectWav reads it
   const mono = wav.slice();
   new DataView(mono.buffer).setUint16(22, 1, true);
   assert.match(checkUploadable(mono)[0], /stereo/);
+});
+
+// Files //////////////////////////////////////////////////////////////////////
+
+test("files: write, read back and replace small text files", async () => {
+  const device = await startDevice();
+  const { link } = device;
+  assert.ok(link.hasFiles());
+  assert.equal(await link.readFile("README.md"), null);
+
+  // At the root: the temp file lives in SK/, which is created for it
+  const readme = "# Card\n\nBuilt with \u00e9\u00e8 and \u2713.\n";
+  await link.writeFile("README.md", readme);
+  assert.equal(fs.readFileSync(path.join(device.root, "README.md"), "utf8"), readme);
+  assert.equal(await link.readFile("README.md"), readme);
+
+  const json = JSON.stringify({ metadata: { projectName: "test" }, tapes: {} }, null, 2);
+  await link.writeFile("SK/project.json", json);
+  assert.equal(fs.readFileSync(path.join(device.root, "SK/project.json"), "utf8"), json);
+  assert.equal(await link.readFile("SK/project.json"), json);
+  assert.ok(!fs.existsSync(path.join(device.root, "SK/file.tmp")));
+
+  // Replaced, not appended to; empty is allowed
+  await link.writeFile("SK/project.json", "{}");
+  assert.equal(await link.readFile("SK/project.json"), "{}");
+  await link.writeFile("README.md", "");
+  assert.equal(await link.readFile("README.md"), "");
+
+  // The largest file fits in one frame each way
+  const big = "x".repeat(MAX_FILE_SIZE);
+  await link.writeFile("SK/big.txt", big);
+  assert.equal(await link.readFile("SK/big.txt"), big);
+  await assert.rejects(link.writeFile("SK/big.txt", big + "x"), /larger than/);
+  // Put on the card some other way, too large to read in one frame
+  fs.writeFileSync(path.join(device.root, "SK/huge.txt"), big + "x");
+  await assert.rejects(link.readFile("SK/huge.txt"), e => e instanceof DeviceError && e.status === STATUS.tooLarge);
+
+  // Not during another session
+  const begin = new Uint8Array(12);
+  new DataView(begin.buffer).setUint32(4, 100, true);
+  await link.request(CMD.uploadBegin, begin);
+  await assert.rejects(link.readFile("README.md"), e => e instanceof DeviceError && e.status === STATUS.badState);
+  await link.request(CMD.uploadAbort);
+  await device.stop();
+});
+
+test("files: only small text files at the root or in SK/ are reachable", async () => {
+  const device = await startDevice();
+  const { link } = device;
+  for (const name of ["README.md", "SK/project.json", "notes.TXT", "SK/a-b_c.v2.json", "SK/config.txt"]) {
+    assert.ok(isFileName(name), name);
+  }
+  const outside = [
+    "", "sk/x.txt", "../x.txt", "SK/../x.txt", "SK/B/1.wav", "SK/B/1.txt", "x.wav", "SK/MEM", "SK/B",
+    ".hidden.txt", "SK/.x.md", "a/b.txt", "/x.txt", "SK/file.tmp", "SK/config.tmp", "na me.txt", "x.json/",
+    "x".repeat(29) + ".md",
+  ];
+  for (const name of outside) {
+    assert.ok(!isFileName(name), name);
+    await assert.rejects(link.readFile(name), /doesn't read or write/, name);
+  }
+
+  // The device checks the same, whatever the host sends
+  const field = name => {
+    const bytes = new Uint8Array(32);
+    bytes.set(new TextEncoder().encode(name).subarray(0, 32));
+    return bytes;
+  };
+  for (const name of [...outside, "x".repeat(32)]) {
+    await assert.rejects(link.request(CMD.fileRead, field(name)),
+      e => e instanceof DeviceError && e.status === STATUS.badArg, name);
+    const write = new Uint8Array(36);
+    write.set(field(name));
+    await assert.rejects(link.request(CMD.fileWrite, write),
+      e => e instanceof DeviceError && e.status === STATUS.badArg, name);
+  }
+  await assert.rejects(link.request(CMD.fileRead, new Uint8Array(4)),
+    e => e instanceof DeviceError && e.status === STATUS.badArg, "short request");
+  // Nothing was written
+  assert.deepEqual(fs.readdirSync(device.root).filter(f => f !== "SK"), []);
+  await device.stop();
 });
 
 // Settings ///////////////////////////////////////////////////////////////////

@@ -16,6 +16,10 @@ through the temp file. */
 static constexpr const char* kStorageConfigPath = "/SK/config.txt";
 static constexpr const char* kStorageConfigTempPath = "/SK/config.tmp";
 
+/* Small text files the transfer service writes for the host (FILE_WRITE), through
+this temp file. */
+static constexpr const char* kStorageFileTempPath = "/SK/file.tmp";
+
 const char* storage_root_dir();                     // "SK"
 const char* storage_tape_name(const uint8_t tape_idx); // "B", "G", ...
 const char* storage_slot_name(const uint8_t slot_idx); // "1" ... "6"
