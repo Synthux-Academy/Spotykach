@@ -19,6 +19,7 @@ void Fx::init(const Params p)
 
     _grit_switch.init(p.sample_rate);
     _grit.init(p.sample_rate);
+    _grit.set_mix(.3f, true);
 }
 
 void Fx::set_grit_on(const bool on)

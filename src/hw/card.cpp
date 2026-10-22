@@ -1,11 +1,13 @@
 #include "card.h"
 #include "../memory/wav.h"
+#include "../core/config.h"
 
 using namespace spotykach;
 using namespace daisy;
 
 Card::Card():
-_state { State::unmounted }
+_state { State::unmounted },
+_is_file_open { false }
 {}
 
 void Card::init(uint8_t* buffer) {
@@ -24,7 +26,7 @@ void Card::init_read_audio(AudioData data)
 
     _size_read_audio = 0;
 
-    char audio_path[11];
+    char audio_path[16]; // /SK/G/1.wav
     sprintf(audio_path, "/%s/%s/%s", data.root_dir, data.tape_dir, data.file_name); // /SK/G/1.WAV
 
     WavHeader hdr;
@@ -54,17 +56,56 @@ void Card::init_read_audio(AudioData data)
             _slices = data.cue_points;
             _slice_count = data.cue_count;
             _hdr_size = hdr_size;
+            _data_size = hdr.DataSize + (hdr.DataSize % 2); // Chunks are word-aligned
             _audio_size = std::min(data.body_size, (size_t)hdr.DataSize);
+            _scrubbed = 0;
             _state = State::read_audio;        
     }
     else {
         _state = State::failed;
         _close_file();      
     }
-    if (f_lseek(&_sdfile, hdr_size) != FR_OK) {
-        _state = State::failed;
-        _close_file();
+}
+
+/*
+The SD driver hands the destination address straight to the SDMMC DMA, which
+needs it word-aligned. FatFS reads whole sectors directly into the destination
+after copying the head of a partial sector, so reading from a position that
+isn't 4-byte aligned shifts the data. Reading from the sector boundary below
+pos into the aligned buffer and skipping the head avoids that.
+*/
+bool Card::_read_from(const uint32_t pos, uint8_t*& out_data, size_t& out_size, bool& out_eof)
+{
+    auto aligned = pos & ~(uint32_t)(kSectorSize - 1);
+    auto skip = pos - aligned;
+    UINT bytesread = 0;
+    if (f_lseek(&_sdfile, aligned) != FR_OK || f_read(&_sdfile, _buffer, kChunk, &bytesread) != FR_OK) {
+        return false;
     }
+    out_data = _buffer + std::min((size_t)skip, (size_t)bytesread);
+    out_size = bytesread > skip ? bytesread - skip : 0;
+    out_eof = bytesread < kChunk;
+    return true;
+}
+
+bool Card::read_at(const uint32_t pos, uint8_t*& out_data, size_t& out_size)
+{
+    if (!_is_file_open) return false;
+    bool eof;
+    return _read_from(pos, out_data, out_size, eof);
+}
+
+/* Non-finite samples (corrupt file) would latch the DSP into NaN, replace them with silence */
+void Card::_scrub_audio()
+{
+    auto end = _offset & ~(size_t)3;
+    for (auto i = _scrubbed; i < end; i += 4) {
+        uint32_t bits;
+        std::memcpy(&bits, &_bytes[i], 4);
+        // Exponent all ones: Inf or NaN. Bit test, -ffast-math makes std::isfinite() always true.
+        if ((bits & 0x7F800000u) == 0x7F800000u) std::memset(&_bytes[i], 0, 4);
+    }
+    _scrubbed = end;
 }
 
 void Card::read_audio()
@@ -73,34 +114,38 @@ void Card::read_audio()
         return;
     }
     
-    size_t bytesread;
-    if (f_read(&_sdfile, _buffer, kChunk, (UINT* )&bytesread) != FR_OK) {
+    uint8_t* data;
+    size_t size;
+    bool eof;
+    if (!_read_from(_hdr_size + _offset, data, size, eof)) {
         _state = State::failed;
         _close_file();
         return;
     }
 
-    auto buf_len = std::min(_audio_size - _offset, bytesread);
-    std::memcpy(&_bytes[_offset], _buffer, buf_len);
+    auto buf_len = std::min(_audio_size - _offset, size);
+    std::memcpy(&_bytes[_offset], data, buf_len);
     
     _offset += buf_len;
     _size_read_audio = _offset * .125f; // 1 / (2 channels * 4 bytes)
+    _scrub_audio();
 
-    if (bytesread < kChunk || buf_len < bytesread) {
-        if (f_lseek(&_sdfile, _hdr_size + _audio_size) == FR_OK 
-         && f_read(&_sdfile, _buffer, kChunk, (UINT* )&bytesread) == FR_OK) {
+    if (eof || buf_len < size || _offset >= _audio_size) {
+        /* Chunks after "data" (cue points) start at the end of the whole
+        data chunk, which can be past the part that fit into the buffer. */
+        if (_read_from(_hdr_size + _data_size, data, size, eof)) {
             find_cue_points(
-                _buffer,
+                data,
                 _slices,
                 _slice_count,
-                _audio_size / 8,
-                bytesread
+                _size_read_audio,
+                size
             );
-            auto end_idx = (int32_t)*_slice_count - 1;
-            if (end_idx >= 0 && end_idx < 31 && _slices[end_idx] < _audio_size) {
-                _slices[end_idx + 1] = _size_read_audio;
-                *_slice_count += 1;
-            }
+        }
+        auto count = *_slice_count;
+        if (count > 0 && count < kMaxSlicePointCount && _slices[count - 1] < _size_read_audio) {
+            _slices[count] = _size_read_audio;
+            *_slice_count += 1;
         }
         _notify_finish_processing = true;
         _state = State::idle;
@@ -119,7 +164,7 @@ void Card::init_write_audio(const AudioData data)
         return;
     }
 
-    char tape_dir_path[4];
+    char tape_dir_path[8]; // SK/G
     sprintf(tape_dir_path, "%s/%s", data.root_dir, data.tape_dir);
     res = f_mkdir(tape_dir_path);
     if (res != FR_OK && res != FR_EXIST) {
@@ -127,7 +172,7 @@ void Card::init_write_audio(const AudioData data)
         return;
     }
 
-    char audio_path[11]; // /SK/G/1.wav
+    char audio_path[16]; // SK/G/1.wav
     sprintf(audio_path, "%s/%s", tape_dir_path, data.file_name);
     if (f_open(&_sdfile, audio_path, (FA_CREATE_ALWAYS) | (FA_WRITE)) != FR_OK) {
         _state = State::failed;
@@ -266,4 +311,114 @@ void Card::cancel()
 {
     _close_file();
     _state = State::idle;
+}
+// Transfer ////////////////////////////////////////
+bool Card::begin_transfer()
+{
+    if (_state != State::idle) return false;
+    _is_file_open = false;
+    _state = State::transfer;
+    return true;
+}
+
+void Card::end_transfer()
+{
+    if (_state != State::transfer) return;
+    close();
+    _state = State::idle;
+}
+
+bool Card::stat(const char* path, uint32_t& out_size)
+{
+    if (_state != State::transfer) return false;
+    FILINFO fno;
+    if (f_stat(path, &fno) != FR_OK) return false;
+    out_size = fno.fsize;
+    return true;
+}
+
+bool Card::open_read(const char* path, uint32_t& out_size)
+{
+    if (_state != State::transfer) return false;
+    close();
+    if (f_open(&_sdfile, path, FA_OPEN_EXISTING | FA_READ) != FR_OK) return false;
+    _is_file_open = true;
+    out_size = f_size(&_sdfile);
+    return true;
+}
+
+bool Card::open_write(const char* path)
+{
+    if (_state != State::transfer) return false;
+    close();
+    if (f_open(&_sdfile, path, FA_CREATE_ALWAYS | FA_WRITE) != FR_OK) return false;
+    _is_file_open = true;
+    return true;
+}
+
+bool Card::read(uint8_t* out_data, const size_t size, size_t& out_read)
+{
+    if (!_is_file_open) return false;
+    UINT bytesread = 0;
+    auto res = f_read(&_sdfile, out_data, size, &bytesread);
+    out_read = bytesread;
+    return res == FR_OK;
+}
+
+bool Card::write(const uint8_t* in_data, const size_t size)
+{
+    if (!_is_file_open) return false;
+    UINT byteswritten = 0;
+    return f_write(&_sdfile, in_data, size, &byteswritten) == FR_OK && byteswritten == size;
+}
+
+bool Card::seek(const uint32_t offset)
+{
+    if (!_is_file_open) return false;
+    return f_lseek(&_sdfile, offset) == FR_OK;
+}
+
+uint32_t Card::tell()
+{
+    return _is_file_open ? f_tell(&_sdfile) : 0;
+}
+
+bool Card::close()
+{
+    if (!_is_file_open) return true;
+    _is_file_open = false;
+    return f_close(&_sdfile) == FR_OK;
+}
+
+bool Card::remove(const char* path)
+{
+    if (_state != State::transfer) return false;
+    auto res = f_unlink(path);
+    return res == FR_OK || res == FR_NO_FILE;
+}
+
+bool Card::rename(const char* from, const char* to)
+{
+    if (_state != State::transfer) return false;
+    return f_rename(from, to) == FR_OK;
+}
+
+bool Card::make_dir(const char* path)
+{
+    if (_state != State::transfer) return false;
+    auto res = f_mkdir(path);
+    return res == FR_OK || res == FR_EXIST;
+}
+
+bool Card::space_kib(uint32_t& out_total, uint32_t& out_free)
+{
+    if (_state != State::transfer) return false;
+    FATFS* fs;
+    DWORD free_clusters;
+    if (f_getfree(_fsi.GetSDPath(), &free_clusters, &fs) != FR_OK) return false;
+    auto sectors_per_cluster = (uint64_t)fs->csize;
+    // _MIN_SS == _MAX_SS == 512, two sectors make a KiB
+    out_total = (uint32_t)(((uint64_t)(fs->n_fatent - 2) * sectors_per_cluster) / 2);
+    out_free = (uint32_t)(((uint64_t)free_clusters * sectors_per_cluster) / 2);
+    return true;
 }

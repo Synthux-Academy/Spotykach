@@ -135,6 +135,10 @@ class Hardware
     // This is a blocking call, don't do it in audiocallback
     void ProcessPads();
 
+    // Rear USB port: USB MIDI on/off, for switching to USB transfer mode
+    void StartUsbMidi();
+    void StopUsbMidi();
+
     inline void SetOnTouch(std::function<void(Pad)> on_touch) { _on_touch = on_touch; };
     inline void SetOnRelease(std::function<void(Pad)> on_release) { _on_release = on_release; };
 

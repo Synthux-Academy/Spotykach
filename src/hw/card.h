@@ -9,6 +9,7 @@ class Card
 {
   public:
     static constexpr size_t kChunk = 32768; //32KB
+    static constexpr size_t kSectorSize = 512;
 
     enum class State: uint8_t {
       unmounted,
@@ -18,6 +19,7 @@ class Card
       write_file,
       write_audio,
       read_audio,
+      transfer,
       failed
     };
 
@@ -31,7 +33,7 @@ class Card
       char* tape_dir;
       char* file_name;
       size_t* cue_points;
-      uint8_t* cue_count;
+      uint16_t* cue_count;
     };
 
     Card();
@@ -65,10 +67,33 @@ class Card
 
     void cancel();
 
+    /* USB transfer mode: plain file access, available only
+    while the card is in State::transfer. */
+    bool begin_transfer();
+    void end_transfer();
+    uint8_t* buffer() const { return _buffer; }
+    bool stat(const char* path, uint32_t& out_size);
+    bool open_read(const char* path, uint32_t& out_size);
+    bool open_write(const char* path);
+    bool read(uint8_t* out_data, const size_t size, size_t& out_read);
+    bool write(const uint8_t* in_data, const size_t size);
+    bool seek(const uint32_t offset);
+    /* Reads up to a chunk starting at any file position into buffer(),
+    see _read_from(). out_data points into buffer(). */
+    bool read_at(const uint32_t pos, uint8_t*& out_data, size_t& out_size);
+    uint32_t tell();
+    bool close();
+    bool remove(const char* path);
+    bool rename(const char* from, const char* to);
+    bool make_dir(const char* path);
+    bool space_kib(uint32_t& out_total, uint32_t& out_free);
+
   private:
     NOCOPY(Card)
 
     void _close_file();
+    bool _read_from(const uint32_t pos, uint8_t*& out_data, size_t& out_size, bool& out_eof);
+    void _scrub_audio();
 
     daisy::SdmmcHandler   _sd;
     daisy::FatFSInterface _fsi;
@@ -80,10 +105,13 @@ class Card
     size_t*   _slices;
     size_t    _audio_size;
     size_t    _hdr_size;
+    size_t    _data_size;
     size_t    _offset;
     size_t    _size_read_audio;
-    uint8_t*  _slice_count;
+    size_t    _scrubbed;
+    uint16_t* _slice_count;
 
     bool _notify_finish_processing;
+    bool _is_file_open;
 };
 };

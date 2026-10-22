@@ -68,7 +68,7 @@ public:
   void clear_cue();
   void set_snap_to_cue(const bool value) { _snap_to_cue = value; }
   size_t* cue_points() const { return _cue_points; }
-  uint8_t* cue_count() { return &_cue_points_count; }
+  uint16_t* cue_count() { return &_cue_points_count; }
 
   float increment() const { return _increment; }
 
@@ -129,7 +129,7 @@ private:
   size_t  _slice_size;
   size_t  _auto_cue_max_idx;
   size_t* _cue_points;
-  uint8_t _cue_points_count;
+  uint16_t _cue_points_count;
   uint8_t _cue_size_delta;
   bool    _is_auto_cue;
   bool    _snap_to_cue;

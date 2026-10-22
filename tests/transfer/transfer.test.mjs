@@ -1,0 +1,476 @@
+// @synthuxacademy/spotykach-transfer against the firmware's transfer code (build/harness),
+// over a fake Web Serial port. Run through run.sh.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { spawn, execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import {
+  SkLink, CMD, STATUS, FRAME_ERROR, DeviceError, SLOT_OCCUPIED, SLOT_LOADABLE, SLOT_PARSED,
+  crc32, encodeWav, inspectWav, checkUploadable,
+  CONFIG_KEYS, parseConfig, formatConfig, MAX_FILE_SIZE, isFileName,
+} from "../../web/spotykach-transfer/index.js";
+
+const HARNESS = process.env.HARNESS;
+assert.ok(HARNESS, "HARNESS must point to the built harness, use run.sh");
+const CONFIG_DUMP = process.env.CONFIG_DUMP;
+assert.ok(CONFIG_DUMP, "CONFIG_DUMP must point to the built config_dump, use run.sh");
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+/*
+Starts the device harness on an empty card and connects a link to it.
+fault: harness-side fault (see harness.cpp); onWrite(bytes, write): host-side hook
+that may alter or delay a frame on its way to the device.
+*/
+async function startDevice({ fault, onWrite } = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sk-card-"));
+  const env = { ...process.env };
+  if (fault) env.FAULT = fault;
+  const child = spawn(HARNESS, [root], { stdio: ["pipe", "pipe", "pipe"], env });
+  let stderr = "";
+  child.stderr.on("data", d => { stderr += d; });
+  const exited = new Promise(resolve => child.on("exit", code => resolve(code)));
+
+  const queue = [];
+  let wake = null;
+  let ended = false;
+  child.stdout.on("data", d => { queue.push(new Uint8Array(d)); wake?.(); });
+  child.stdout.on("end", () => { ended = true; wake?.(); });
+
+  let writes = Promise.resolve();
+  const write = bytes => child.stdin.write(Buffer.from(bytes));
+  const port = {
+    async open() {},
+    async close() {},
+    readable: {
+      getReader: () => ({
+        async read() {
+          while (!queue.length && !ended) await new Promise(resolve => { wake = resolve; });
+          return queue.length ? { value: queue.shift(), done: false } : { done: true };
+        },
+        async cancel() {},
+        releaseLock() {},
+      }),
+    },
+    writable: {
+      getWriter: () => ({
+        // Web Serial keeps writes in order
+        write(bytes) {
+          writes = writes.then(() => (onWrite ? onWrite(bytes, write) : write(bytes)));
+          return writes;
+        },
+        releaseLock() {},
+      }),
+    },
+  };
+
+  const link = await SkLink.open(port);
+  const info = await link.hello();
+  return {
+    link, info, root,
+    async stop() {
+      if (!link.closed) await link.exit();
+      const code = await exited;
+      fs.rmSync(root, { recursive: true, force: true });
+      assert.equal(code, 0, `harness exited with ${code}: ${stderr}`);
+    },
+  };
+}
+
+function testAudio(seconds, seed = 1) {
+  const frames = Math.round(seconds * 48000);
+  const left = new Float32Array(frames);
+  const right = new Float32Array(frames);
+  for (let i = 0; i < frames; i++) {
+    left[i] = Math.sin((i + seed) / 7);
+    right[i] = Math.cos((i * seed) / 11);
+  }
+  return { left, right, frames };
+}
+
+// Every 5th data frame of a given type
+function nthFrame(type, n, action) {
+  let count = 0;
+  return (bytes, write) => (bytes[2] === type && ++count === n ? action(bytes, write) : write(bytes));
+}
+
+test("hello, list, upload, download, delete", async () => {
+  const device = await startDevice();
+  const { link, info } = device;
+  assert.equal(info.protoMajor, 1);
+  assert.equal(info.tapeNames, "BGPRTY");
+  assert.equal(info.maxFrames, 42 * 48000);
+  assert.equal(info.maxCues, 255);
+
+  let slots = await link.list();
+  assert.equal(slots.length, 36);
+  assert.ok(slots.every(s => !(s.flags & SLOT_OCCUPIED)));
+
+  const { left, right, frames } = testAudio(3);
+  const cues = Array.from({ length: 255 }, (_, i) => i * 500);
+  const name = "Kick — ünïcode.wav";
+  const wav = encodeWav({ left, right, cues, name });
+  let progress = 0;
+  await link.upload(1, 2, wav, { onProgress: p => { progress = p; } });
+  assert.equal(progress, 1);
+
+  slots = await link.list();
+  const entry = slots.find(s => s.tape === 1 && s.slot === 2);
+  assert.equal(entry.flags, SLOT_OCCUPIED | SLOT_LOADABLE | SLOT_PARSED);
+  assert.equal(entry.frames, frames);
+  assert.equal(entry.cues, 255);
+  assert.equal(entry.name, name);
+  assert.ok(fs.existsSync(path.join(device.root, "SK/G/3.wav")));
+  assert.ok(!fs.existsSync(path.join(device.root, "SK/G/3.tmp")));
+
+  const back = await link.download(1, 2);
+  assert.deepEqual(back, wav);
+
+  await link.remove(1, 2);
+  slots = await link.list();
+  assert.ok(!(slots.find(s => s.tape === 1 && s.slot === 2).flags & SLOT_OCCUPIED));
+  await device.stop();
+});
+
+test("readSlot reads ranges at any offset, e.g. the cue chunk after the audio, the device only aligned ones", async () => {
+  const device = await startDevice();
+  const { link } = device;
+  const { left, right } = testAudio(2);
+  const wav = encodeWav({ left, right, cues: [0, 1000, 50000], name: "kick.wav" });
+  await link.upload(0, 0, wav);
+
+  const local = inspectWav(wav);
+  const dataEnd = local.dataOffset + local.dataSize;
+  assert.notEqual(dataEnd % 512, 0, "the test needs an unaligned tail");
+  const { head, tail, odd } = await link.readSlot(0, 0, async (size, read) => {
+    const args = new Uint8Array(8);
+    new DataView(args.buffer).setUint32(0, 1234, true);
+    new DataView(args.buffer).setUint32(4, 100, true);
+    await assert.rejects(link.request(CMD.downloadRead, args), e => e.status === STATUS.badArg);
+    return {
+      head: await read(0, 4096),
+      tail: await read(dataEnd, size - dataEnd),
+      odd: await read(1234, 40000), // unaligned and longer than one chunk
+    };
+  });
+  assert.deepEqual(head, wav.subarray(0, 4096));
+  assert.deepEqual(tail, wav.subarray(dataEnd));
+  assert.deepEqual(odd, wav.subarray(1234, 1234 + 40000));
+  await device.stop();
+});
+
+for (const [name, options] of [
+  ["a corrupted request", { onWrite: nthFrame(CMD.uploadData, 5, (b, write) => { const c = b.slice(); c[5000] ^= 0x55; return write(c); }) }],
+  ["a lost reply", { fault: "upload-noreply" }],
+  ["a request that stalls for 2.5 s", { onWrite: nthFrame(CMD.uploadData, 5, async (b, write) => { write(b.subarray(0, 10000)); await sleep(2500); write(b.subarray(10000)); }) }],
+]) {
+  test(`upload recovers from ${name}`, async () => {
+    const device = await startDevice(options);
+    const { left, right } = testAudio(6);
+    const wav = encodeWav({ left, right, cues: [0, 1000], name: "atmo.wav" });
+    await device.link.upload(2, 1, wav);
+    assert.deepEqual(new Uint8Array(fs.readFileSync(path.join(device.root, "SK/P/2.wav"))), wav);
+    await device.stop();
+  });
+}
+
+for (const fault of ["read-cut", "read-drop", "read-burst"]) {
+  test(`download recovers from ${fault}`, async () => {
+    const device = await startDevice({ fault });
+    const { left, right } = testAudio(10, 3);
+    const wav = encodeWav({ left, right, name: "long.wav" });
+    await device.link.upload(5, 5, wav);
+    assert.deepEqual(await device.link.download(5, 5), wav);
+    await device.stop();
+  });
+}
+
+test("failed uploads keep the old slot", async () => {
+  const device = await startDevice();
+  const { link, root } = device;
+  const { left, right } = testAudio(1);
+  const wav = encodeWav({ left, right, name: "keep.wav" });
+  await link.upload(1, 2, wav);
+
+  // Wrong whole-file CRC
+  const begin = new Uint8Array(12);
+  const dv = new DataView(begin.buffer);
+  begin.set([1, 2, 0, 0]);
+  dv.setUint32(4, wav.length, true);
+  dv.setUint32(8, crc32(wav) ^ 1, true);
+  await link.request(CMD.uploadBegin, begin);
+  for (let o = 0; o < wav.length; o += 32768) {
+    const chunk = wav.subarray(o, o + 32768);
+    const payload = new Uint8Array(4 + chunk.length);
+    new DataView(payload.buffer).setUint32(0, o, true);
+    payload.set(chunk, 4);
+    await link.request(CMD.uploadData, payload);
+  }
+  await assert.rejects(link.request(CMD.uploadCommit), e => e instanceof DeviceError && e.status === STATUS.badCrc);
+  assert.deepEqual(new Uint8Array(fs.readFileSync(path.join(root, "SK/G/3.wav"))), wav);
+  assert.ok(!fs.existsSync(path.join(root, "SK/G/3.tmp")));
+
+  // Not a WAV: refused locally, and by the device when sent anyway
+  const junk = new Uint8Array(1000).fill(7);
+  await assert.rejects(link.upload(0, 0, junk), /isn't a WAV/);
+  const junkBegin = new Uint8Array(12);
+  new DataView(junkBegin.buffer).setUint32(4, junk.length, true);
+  new DataView(junkBegin.buffer).setUint32(8, crc32(junk), true);
+  await link.request(CMD.uploadBegin, junkBegin);
+  const junkData = new Uint8Array(4 + junk.length);
+  junkData.set(junk, 4);
+  await link.request(CMD.uploadData, junkData);
+  await assert.rejects(link.request(CMD.uploadCommit), e => e.status === STATUS.badFormat);
+  assert.ok(!fs.existsSync(path.join(root, "SK/B/1.wav")));
+  await device.stop();
+});
+
+test("a serial port error keeps its message, with the detail", async () => {
+  // Web Serial fails with a DOMException, whose message can't be appended to
+  const link = new SkLink({});
+  link.request = async () => { throw new DOMException("The device has been lost.", "NetworkError"); };
+  await assert.rejects(link._sendChunk(new Uint8Array(8), 4096, 4),
+    e => /device has been lost/.test(e.message) && /upload at byte 4096/.test(e.message) && e.cause?.name === "NetworkError");
+  await assert.rejects(link._readRange(0, 4096, 4096),
+    e => /device has been lost/.test(e.message) && /read at byte 0/.test(e.message) && e.cause?.name === "NetworkError");
+});
+
+test("invalid requests", async () => {
+  const device = await startDevice();
+  const { link } = device;
+  const status = s => e => e instanceof DeviceError && e.status === s;
+  await assert.rejects(link.request(CMD.downloadRead, new Uint8Array(8)), status(STATUS.badState));
+  await assert.rejects(link.request(CMD.remove, new Uint8Array([6, 0, 0, 0])), status(STATUS.badArg));
+  await assert.rejects(link.request(0x55), status(STATUS.unknownCmd));
+  await assert.rejects(link.download(0, 5), status(STATUS.notFound));
+
+  // Upload chunks other than the last must keep the file position sector-aligned
+  const begin = new Uint8Array(12);
+  new DataView(begin.buffer).setUint32(4, 2000, true);
+  await link.request(CMD.uploadBegin, begin);
+  await assert.rejects(link.request(CMD.uploadData, new Uint8Array(4 + 1000)), status(STATUS.badArg));
+  const ahead = new Uint8Array(4 + 512);
+  new DataView(ahead.buffer).setUint32(0, 512, true);
+  await assert.rejects(link.request(CMD.uploadData, ahead), status(STATUS.badOffset));
+  await link.request(CMD.uploadAbort);
+  await device.stop();
+});
+
+test("the device reports why it rejected a frame", async () => {
+  let mode = null;
+  const device = await startDevice({
+    onWrite: async (bytes, write) => {
+      if (bytes[2] !== CMD.ping || !mode) return write(bytes);
+      const current = mode;
+      mode = null;
+      if (current === "crc") { const c = bytes.slice(); c[8] ^= 1; return write(c); }
+      write(bytes.subarray(0, 6)); // header cut short, then silence
+      await sleep(2500);
+    },
+  });
+  mode = "crc";
+  await assert.rejects(device.link.request(CMD.ping), e => e.status === STATUS.badFrame && e.frameError === FRAME_ERROR.crc && /checksum/.test(e.message));
+  await sleep(250);
+  mode = "stale";
+  await assert.rejects(device.link.request(CMD.ping, undefined, 5000), e => e.frameError === FRAME_ERROR.stale && /stopped arriving/.test(e.message));
+  await sleep(250);
+  await device.link.request(CMD.ping);
+  await device.stop();
+});
+
+test("garbage on the line is skipped", async () => {
+  let first = true;
+  const device = await startDevice({
+    onWrite: (bytes, write) => {
+      if (first && bytes[2] === CMD.ping) { first = false; write(new TextEncoder().encode("AT\r\nATZ\r\n")); }
+      return write(bytes);
+    },
+  });
+  await device.link.request(CMD.ping);
+  await device.stop();
+});
+
+test("encodeWav: audio 4-byte aligned for every name length, inspectWav reads it back", () => {
+  const left = new Float32Array([0, 0.5, -0.5, 1]);
+  const right = new Float32Array([1, -1, 0.25, 0]);
+  for (let n = 0; n <= 70; n++) {
+    const name = "a".repeat(n);
+    const wav = encodeWav({ left, right, cues: [1, 3], name });
+    const info = inspectWav(wav);
+    assert.equal(info.dataOffset % 4, 0, `name length ${n}`);
+    assert.equal(new DataView(wav.buffer).getUint32(4, true), wav.length - 8);
+    assert.equal(info.name, name.slice(0, 64));
+    assert.deepEqual(info.cues, [1, 3]);
+    assert.equal(info.frames, 4);
+    assert.deepEqual(checkUploadable(wav, { maxFrames: 4, maxCues: 2 }), []);
+  }
+  const wav = encodeWav({ left, right, cues: [0, 1, 2] });
+  assert.equal(checkUploadable(wav, { maxFrames: 3, maxCues: 2 }).length, 2);
+  const mono = wav.slice();
+  new DataView(mono.buffer).setUint16(22, 1, true);
+  assert.match(checkUploadable(mono)[0], /stereo/);
+});
+
+// Files //////////////////////////////////////////////////////////////////////
+
+test("files: write, read back and replace small text files", async () => {
+  const device = await startDevice();
+  const { link } = device;
+  assert.ok(link.hasFiles());
+  assert.equal(await link.readFile("README.md"), null);
+
+  // At the root: the temp file lives in SK/, which is created for it
+  const readme = "# Card\n\nBuilt with \u00e9\u00e8 and \u2713.\n";
+  await link.writeFile("README.md", readme);
+  assert.equal(fs.readFileSync(path.join(device.root, "README.md"), "utf8"), readme);
+  assert.equal(await link.readFile("README.md"), readme);
+
+  const json = JSON.stringify({ metadata: { projectName: "test" }, tapes: {} }, null, 2);
+  await link.writeFile("SK/project.json", json);
+  assert.equal(fs.readFileSync(path.join(device.root, "SK/project.json"), "utf8"), json);
+  assert.equal(await link.readFile("SK/project.json"), json);
+  assert.ok(!fs.existsSync(path.join(device.root, "SK/file.tmp")));
+
+  // Replaced, not appended to; empty is allowed
+  await link.writeFile("SK/project.json", "{}");
+  assert.equal(await link.readFile("SK/project.json"), "{}");
+  await link.writeFile("README.md", "");
+  assert.equal(await link.readFile("README.md"), "");
+
+  // The largest file fits in one frame each way
+  const big = "x".repeat(MAX_FILE_SIZE);
+  await link.writeFile("SK/big.txt", big);
+  assert.equal(await link.readFile("SK/big.txt"), big);
+  await assert.rejects(link.writeFile("SK/big.txt", big + "x"), /larger than/);
+  // Put on the card some other way, too large to read in one frame
+  fs.writeFileSync(path.join(device.root, "SK/huge.txt"), big + "x");
+  await assert.rejects(link.readFile("SK/huge.txt"), e => e instanceof DeviceError && e.status === STATUS.tooLarge);
+
+  // Not during another session
+  const begin = new Uint8Array(12);
+  new DataView(begin.buffer).setUint32(4, 100, true);
+  await link.request(CMD.uploadBegin, begin);
+  await assert.rejects(link.readFile("README.md"), e => e instanceof DeviceError && e.status === STATUS.badState);
+  await link.request(CMD.uploadAbort);
+  await device.stop();
+});
+
+test("files: only small text files at the root or in SK/ are reachable", async () => {
+  const device = await startDevice();
+  const { link } = device;
+  for (const name of ["README.md", "SK/project.json", "notes.TXT", "SK/a-b_c.v2.json", "SK/config.txt"]) {
+    assert.ok(isFileName(name), name);
+  }
+  const outside = [
+    "", "sk/x.txt", "../x.txt", "SK/../x.txt", "SK/B/1.wav", "SK/B/1.txt", "x.wav", "SK/MEM", "SK/B",
+    ".hidden.txt", "SK/.x.md", "a/b.txt", "/x.txt", "SK/file.tmp", "SK/config.tmp", "na me.txt", "x.json/",
+    "x".repeat(29) + ".md",
+  ];
+  for (const name of outside) {
+    assert.ok(!isFileName(name), name);
+    await assert.rejects(link.readFile(name), /doesn't read or write/, name);
+  }
+
+  // The device checks the same, whatever the host sends
+  const field = name => {
+    const bytes = new Uint8Array(32);
+    bytes.set(new TextEncoder().encode(name).subarray(0, 32));
+    return bytes;
+  };
+  for (const name of [...outside, "x".repeat(32)]) {
+    await assert.rejects(link.request(CMD.fileRead, field(name)),
+      e => e instanceof DeviceError && e.status === STATUS.badArg, name);
+    const write = new Uint8Array(36);
+    write.set(field(name));
+    await assert.rejects(link.request(CMD.fileWrite, write),
+      e => e instanceof DeviceError && e.status === STATUS.badArg, name);
+  }
+  await assert.rejects(link.request(CMD.fileRead, new Uint8Array(4)),
+    e => e instanceof DeviceError && e.status === STATUS.badArg, "short request");
+  // Nothing was written
+  assert.deepEqual(fs.readdirSync(device.root).filter(f => f !== "SK"), []);
+  await device.stop();
+});
+
+// Settings ///////////////////////////////////////////////////////////////////
+
+const DEFAULTS = Object.fromEntries(Object.entries(CONFIG_KEYS).map(([k, spec]) => [k, spec.default]));
+
+// What the firmware's Config::fill reads from the text
+function deviceReads(text) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sk-config-"));
+  const file = path.join(dir, "config.txt");
+  fs.writeFileSync(file, text);
+  try {
+    return JSON.parse(execFileSync(CONFIG_DUMP, [file], { encoding: "utf8" }));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("settings: read, write and read back through the device", async () => {
+  const device = await startDevice();
+  const { link } = device;
+  assert.ok(link.hasConfig());
+  assert.equal(await link.readConfig(), null);
+
+  const values = { ...parseConfig(null), mid_ch_a: 16, mid_ps_b: 1, cue_sm_a: 2, grt_mx_b: 10 };
+  const text = formatConfig(values, null);
+  await link.writeConfig(text);
+  assert.equal(fs.readFileSync(path.join(device.root, "SK/config.txt"), "utf8"), text);
+  assert.ok(!fs.existsSync(path.join(device.root, "SK/config.tmp")));
+  assert.equal(await link.readConfig(), text);
+  assert.deepEqual(parseConfig(await link.readConfig()), values);
+
+  // Replaced, not appended to
+  await link.writeConfig("pre_load\n0\n");
+  assert.equal(await link.readConfig(), "pre_load\n0\n");
+  await link.writeConfig("");
+  assert.equal(await link.readConfig(), "");
+
+  await assert.rejects(link.writeConfig("x".repeat(link.info.maxChunk + 1)), /larger than/);
+  // Not during another session
+  const begin = new Uint8Array(12);
+  new DataView(begin.buffer).setUint32(4, 100, true);
+  await link.request(CMD.uploadBegin, begin);
+  await assert.rejects(link.readConfig(), e => e instanceof DeviceError && e.status === STATUS.badState);
+  await link.request(CMD.uploadAbort);
+  await device.stop();
+});
+
+test("settings: the firmware reads what formatConfig writes", () => {
+  assert.deepEqual(deviceReads(""), DEFAULTS);
+  assert.deepEqual(deviceReads(formatConfig(DEFAULTS)), DEFAULTS);
+  const values = {
+    mid_ch_a: 10, mid_ch_b: 16, mid_ps_a: 1, mid_ps_b: 0, pre_load: 0,
+    slc_mn_a: 0, slc_mn_b: 1, cue_sm_a: 1, cue_sm_b: 2, grt_mx_a: 0, grt_mx_b: 7,
+  };
+  assert.deepEqual(deviceReads(formatConfig(values)), values);
+  assert.deepEqual(parseConfig(formatConfig(values)), values);
+  for (let mix = 0; mix <= 10; mix++) {
+    assert.equal(deviceReads(formatConfig({ ...values, grt_mx_a: mix })).grt_mx_a, mix);
+  }
+});
+
+test("settings: parseConfig reads files like the firmware, formatConfig keeps their other lines", () => {
+  const file = "mid_ch_a\r\n 1 2 \r\n\r\nmy_note\r\n42\r\ncue_sm_b\r\n1\r\n2\r\nmid_ch_a\r\n";
+  const read = parseConfig(file);
+  assert.equal(read.mid_ch_a, 12); // spaces dropped
+  assert.equal(read.cue_sm_b, 2);  // the last value wins
+  assert.deepEqual(read, { ...DEFAULTS, mid_ch_a: 12, cue_sm_b: 2 });
+  assert.deepEqual(deviceReads(file), read);
+
+  // Out of range: clamped for the page
+  assert.equal(parseConfig("mid_ch_b\n40\ngrt_mx_a\n-3\n").mid_ch_b, 16);
+  assert.equal(parseConfig("grt_mx_a\n-3\n").grt_mx_a, 0);
+  assert.equal(parseConfig("toString\n1\n").toString, Object.prototype.toString);
+
+  const written = formatConfig({ ...read, mid_ch_a: 3, cue_sm_b: 0, pre_load: 0 }, file);
+  assert.ok(written.includes("my_note\r\n42\r\n"), "unknown keys stay");
+  assert.equal(written.split("\r\n").filter(l => l === "mid_ch_a").length, 2, "key lines stay");
+  assert.deepEqual(deviceReads(written), { ...read, mid_ch_a: 3, cue_sm_b: 0, pre_load: 0 });
+  assert.deepEqual(parseConfig(written), { ...read, mid_ch_a: 3, cue_sm_b: 0, pre_load: 0 });
+  assert.ok(!/[^\r]\n/.test(written), "line endings stay");
+});

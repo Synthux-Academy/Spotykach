@@ -53,6 +53,18 @@ public:
     
     void calibrate(const bool recalibrate);
 
+    CoreMIDI& midi() { return _midi; }
+
+    // USB transfer mode ////////////////////
+    void set_transfer(const bool is_active);
+    void set_transfer_progress(const bool is_busy, const float progress)
+    {
+        _transfer_busy = is_busy;
+        _transfer_progress = progress;
+    }
+    /* Reads the pads, returns true if exit was requested on the device */
+    bool process_transfer();
+
 private:
     NOCOPY(CoreUI)
 
@@ -89,6 +101,7 @@ private:
     // LEDs ...............................................
     void _draw_leds();
     void _draw_launching();
+    void _draw_transfer();
 
     void _draw_fx(const Deck::Ref);
     void _draw_play(const Deck::Ref, const bool blink);
@@ -206,6 +219,11 @@ private:
 
     float _led_breathe_phase;
     float _led_breathe_brightness;
+
+    volatile bool  _is_transfer { false };
+    volatile bool  _transfer_busy { false };
+    volatile float _transfer_progress { 0.f };
+    bool           _transfer_exit { false };
     bool _blink_led_on;
 
     float _lfo_a;

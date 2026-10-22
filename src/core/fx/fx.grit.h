@@ -31,7 +31,7 @@ public:
     void set_character(const float norm);
 
     float mix();
-    void set_mix(const float norm);
+    void set_mix(const float norm, const bool all = false);
 
 private:
     NOCOPY(Grit)

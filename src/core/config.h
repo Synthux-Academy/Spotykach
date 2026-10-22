@@ -21,6 +21,7 @@ public:
         std::bitset<2> midi_play_stop = 0;
         std::bitset<2> is_slice_mono = { 0 };
         std::array<uint8_t, 2> cue_size_mode = { ignore, ignore };
+        std::array<float, 2> grit_mix = { .3f, .3f };
         bool is_preload_on = true;
     };
 
@@ -29,6 +30,7 @@ public:
     bool is_preload_on() const { return _vals.is_preload_on; }
     bool is_slice_mono(const int idx) const { return _vals.is_slice_mono.test(idx); }
     CueSizeMode cue_size_mode(const int idx) const { return static_cast<CueSizeMode>(_vals.cue_size_mode[idx]); }
+    float grit_mix(const uint8_t idx) const { return _vals.grit_mix[idx]; }
 
     bool is_loaded() const { return _is_loaded; }
 
@@ -50,6 +52,10 @@ private:
 
 
 // STATIC CONFIG ///////////////////////////////////////////////
+// Firmware .....................................
+// MAJOR.MINOR.PATCH, update together with the release tag (v1.3.1 <-> "1.3.1")
+static constexpr const char* kFirmwareVersion = "1.4.0.b5";
+
 // Clock ........................................
 static constexpr uint8_t kPPQNIntern = 48;
 
@@ -75,6 +81,8 @@ static constexpr float kDefaultFeedback = 0.95f; //-3db at -60...0dB scale
 
 // Cue points ...................................
 static constexpr uint16_t kMaxSlicePointCount = 256;
+// One entry is reserved for the end slice appended after loading.
+static constexpr uint16_t kMaxFileCuePoints = kMaxSlicePointCount - 1;
 
 // MIDI ..........................................
 enum CC: uint8_t {

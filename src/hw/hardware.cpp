@@ -184,11 +184,7 @@ void Hardware::Init(float sr, size_t blocksize)
     midi_uart.StartReceive();
 
     #ifndef DEBUG
-    // --- USB MIDI ---
-    MidiUsbHandler::Config midi_usb_cfg;
-    midi_usb_cfg.transport_config.periph = MidiUsbTransport::Config::Periph::EXTERNAL;
-    midi_usb.Init(midi_usb_cfg);
-    midi_usb.StartReceive();
+    StartUsbMidi();
     #endif
 
     // -- DAC --
@@ -228,6 +224,20 @@ void Hardware::ProcessDigitalControls()
     was_pressed = boot_btn_.Pressed();
     
     shiftreg_.Update();
+}
+
+void Hardware::StartUsbMidi()
+{
+    MidiUsbHandler::Config midi_usb_cfg;
+    midi_usb_cfg.transport_config.periph = MidiUsbTransport::Config::Periph::EXTERNAL;
+    midi_usb.Init(midi_usb_cfg);
+    midi_usb.StartReceive();
+}
+
+void Hardware::StopUsbMidi()
+{
+    UsbHandle usb;
+    usb.DeInit(UsbHandle::FS_EXTERNAL);
 }
 
 void Hardware::ProcessPads()
