@@ -16,7 +16,7 @@ export const USB_PRODUCT_ID = 0x5740;
 
 /** Protocol version this module speaks; the package major version follows the protocol major. */
 export const PROTO_MAJOR = 1;
-export const PROTO_MINOR = 1;
+export const PROTO_MINOR = 2;
 
 const SYSEX_ENTER = [0xF0, 0x7D, 0x53, 0x4B, 0x01, 0xF7];
 const SYSEX_REPLY_PREFIX = [0xF0, 0x7D, 0x53, 0x4B, 0x02];
@@ -42,6 +42,8 @@ export const CMD = Object.freeze({
   remove: 0x30,
   configRead: 0x40,
   configWrite: 0x41,
+  fileRead: 0x42,
+  fileWrite: 0x43,
   exit: 0x7F,
 });
 
@@ -699,6 +701,40 @@ export class SkLink {
     });
   }
 
+  /** Protocol 1.2 and up: `readFile` / `writeFile`. */
+  hasFiles() {
+    return !!this.info && this.info.protoMinor >= 2;
+  }
+
+  /**
+   * The text of a small file on the card, null if there is none. `name` is
+   * `NAME.EXT` or `SK/NAME.EXT` with a .txt, .md or .json extension (see `isFileName`).
+   */
+  readFile(name) {
+    return this.exclusive(async () => {
+      try {
+        const p = await this.request(CMD.fileRead, fileNameField(name));
+        return new TextDecoder().decode(p.subarray(4));
+      } catch (e) {
+        if (e instanceof DeviceError && e.status === STATUS.notFound) return null;
+        throw e;
+      }
+    });
+  }
+
+  /** Creates or replaces a small file on the card; a failed write keeps the old one. */
+  writeFile(name, text) {
+    return this.exclusive(async () => {
+      const field = fileNameField(name);
+      const bytes = new TextEncoder().encode(text);
+      if (bytes.length > MAX_FILE_SIZE) throw new Error(`${name} is larger than ${MAX_FILE_SIZE} bytes.`);
+      const payload = new Uint8Array(FILE_NAME_SIZE + bytes.length);
+      payload.set(field);
+      payload.set(bytes, FILE_NAME_SIZE);
+      await this.request(CMD.fileWrite, payload, 10000);
+    });
+  }
+
   /** Back to USB MIDI and closes the port. Best effort: the device also leaves after 10 s of silence. */
   async exit() {
     this.stopKeepAlive();
@@ -708,6 +744,32 @@ export class SkLink {
     this.onclose = null;
     await this.close();
   }
+}
+
+// Files //////////////////////////////////////////////////////////////////////
+
+/** The path field that starts a FILE_READ / FILE_WRITE request, NUL-padded. */
+const FILE_NAME_SIZE = 32;
+/** The largest file `readFile` / `writeFile` handle: one frame, less the path field. */
+export const MAX_FILE_SIZE = 32768 - FILE_NAME_SIZE;
+
+/**
+ * Whether the device reads and writes this file: `NAME.EXT` at the card root or
+ * `SK/NAME.EXT`, with letters, digits, `_`, `-` and `.` in the name and a .txt, .md
+ * or .json extension. The firmware checks the same; this only fails sooner.
+ */
+export function isFileName(name) {
+  return typeof name === "string"
+    && name.length < FILE_NAME_SIZE
+    && /^(SK\/)?[A-Za-z0-9_-][A-Za-z0-9_.-]*\.[A-Za-z]+$/.test(name)
+    && ["txt", "md", "json"].includes(name.slice(name.lastIndexOf(".") + 1).toLowerCase());
+}
+
+function fileNameField(name) {
+  if (!isFileName(name)) throw new Error(`Spotykach doesn't read or write "${name}": use NAME.txt, .md or .json, at the card root or in SK/.`);
+  const field = new Uint8Array(FILE_NAME_SIZE);
+  field.set(new TextEncoder().encode(name));
+  return field;
 }
 
 // Settings ///////////////////////////////////////////////////////////////////

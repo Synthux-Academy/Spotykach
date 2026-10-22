@@ -10,7 +10,7 @@ All multi-byte values are little-endian.
 namespace spotykach::transfer {
 
 static constexpr uint8_t kProtoMajor = 1;
-static constexpr uint8_t kProtoMinor = 1; // 1.1: config_read, config_write
+static constexpr uint8_t kProtoMinor = 2; // 1.1: config_read, config_write; 1.2: file_read, file_write
 
 // SysEx trigger: F0 7D 53 4B <cmd> F7 /////////////
 static constexpr uint8_t kSysExManufacturer = 0x7D; // non-commercial
@@ -33,6 +33,9 @@ static constexpr size_t   kMaxFrame = kHeaderSize + kMaxPayload;
 static constexpr uint8_t  kResponseFlag = 0x80;
 static constexpr uint8_t  kFrameErrorType = 0x80; // response to the reserved command 0x00
 static constexpr uint32_t kMaxNameLength = 64;
+// FILE_READ / FILE_WRITE: the path field that starts the payload, and the largest file
+static constexpr size_t   kFileNameSize = 32;
+static constexpr size_t   kMaxFileSize = kMaxChunk - kFileNameSize;
 
 enum class Command: uint8_t {
     // 0x00 is reserved, its response type marks frame errors
@@ -49,6 +52,8 @@ enum class Command: uint8_t {
     remove         = 0x30,
     config_read    = 0x40,
     config_write   = 0x41,
+    file_read      = 0x42,
+    file_write     = 0x43,
     exit           = 0x7F
 };
 

@@ -17,6 +17,7 @@ This is not USB mass storage. The device switches into a dedicated **transfer mo
 - Delete a slot.
 - Leave transfer mode from the host, from the device, or after an inactivity timeout.
 - Read and write the settings file `SK/config.txt` (protocol 1.1, §5.6).
+- Read and write small text files at the card root and in `SK/`, such as a README or a sample manager's own notes (protocol 1.2, §5.7).
 - Chromium-based browsers on macOS, Windows and Linux. The page is hosted on GitHub Pages.
 
 ### Out of scope (MVP)
@@ -138,6 +139,8 @@ If the page gets no reply within 3 s, it reports "device did not respond (old fi
 | `0x30` | DELETE | `tape u8, slot u8, rsv u16` | — | idle |
 | `0x40` | CONFIG_READ | — | `rsv u8×3, text[≤MAX_CHUNK]`; `NOT_FOUND` without the file | idle |
 | `0x41` | CONFIG_WRITE | `rsv u32, text[≤MAX_CHUNK]` | — | idle |
+| `0x42` | FILE_READ | `name[32]` | `rsv u8×3, text[≤MAX_FILE]`; `NOT_FOUND` without the file | idle |
+| `0x43` | FILE_WRITE | `name[32], text[≤MAX_FILE]` | — | idle |
 | `0x7F` | EXIT | — | — | any |
 
 **HELLO response:**
@@ -145,7 +148,7 @@ If the page gets no reply within 3 s, it reports "device did not respond (old fi
 | Field | Type | Notes |
 |---|---|---|
 | status | u8 | |
-| proto_major, proto_minor | u8, u8 | This spec: `1.1`. The host refuses to work if the major version differs. Minor `1` adds CONFIG_READ / CONFIG_WRITE; with `1.0` firmware the page hides the settings. |
+| proto_major, proto_minor | u8, u8 | This spec: `1.2`. The host refuses to work if the major version differs. Minor `1` adds CONFIG_READ / CONFIG_WRITE; with `1.0` firmware the page hides the settings. Minor `2` adds FILE_READ / FILE_WRITE. |
 | tapes, slots | u8, u8 | `6, 6` |
 | tape_names | 6 × ASCII | `"BGPRTY"` |
 | rsv | u8 ×3 | alignment |
@@ -233,6 +236,8 @@ The browser console logs every lost reply and the read size the download finishe
 
 **Settings:** `CONFIG_READ`, edit, `CONFIG_WRITE` (§5.6).
 
+**Small files:** `FILE_READ` or `FILE_WRITE`, one request each (§5.7).
+
 **Throughput.** Expect roughly 400–800 KB/s, so a full 42 s slot takes about 20–40 s. The 32 KB lockstep round trip (USB FS plus SD latency) is the limit. If this is too slow, double-buffered pipelining can be added later as protocol 1.1.
 
 ### 5.6 Settings file
@@ -252,6 +257,17 @@ The commands carry the file as raw bytes. The firmware doesn't interpret them, s
 - **`CONFIG_READ`** returns the file from position 0, at most `MAX_CHUNK` bytes, read straight into the word-aligned reply. A card without the file answers `NOT_FOUND`, and the host then shows the defaults.
 - **`CONFIG_WRITE`** writes the text to `/SK/config.tmp` (creating `/SK` if needed), closes it, deletes `config.txt` and renames the temp file. It runs within one request. On any error the temp file is deleted, the old file stays and the reply is `IO`. The 4-byte reserved field keeps the text at frame offset 16, like `UPLOAD_DATA`. An empty text is allowed.
 - The package's `parseConfig` reads the file the way the firmware does and clamps values to the ranges above. `formatConfig` writes each known key's value in place of its number line, appends the keys that are missing, and keeps every other line and the file's line endings. The tests check, with the firmware's `Config::fill` built for the host (`tests/transfer/config_dump.cpp`), that the device reads back what `formatConfig` wrote.
+
+### 5.7 Small text files
+
+For files that belong to the card rather than to a slot: a README, or the notes a sample manager keeps about what it put on the card (WAV Builder writes `README.md` and `SK/project.json` when it builds a card). Firmware 1.2 and up. The firmware doesn't know any of these names; it only decides which files are reachable:
+
+- **Names:** `NAME.EXT` at the card root or `SK/NAME.EXT`. The name has letters, digits, `_`, `-` and `.`, doesn't start with `.`, and the extension is `txt`, `md` or `json` (any case). Shorter than 32 characters with the `SK/` prefix. Anything else is `BAD_ARG`, so the slots, `SK/MEM`, the tape folders and the temp files are out of reach.
+- **Request:** the name in a 32-byte field, NUL-padded, at the start of the payload. FILE_WRITE puts the text right after it, at frame offset 44 (word-aligned).
+- **Size:** `MAX_FILE` = `MAX_CHUNK` − 32 = 32 736 bytes, one frame each way. A larger file on the card answers `TOO_LARGE` to FILE_READ.
+- **FILE_READ** returns the whole file, or `NOT_FOUND`.
+- **FILE_WRITE** replaces the file the same way CONFIG_WRITE does (§5.6): it writes `/SK/file.tmp` (creating `/SK` if needed), closes it, deletes the old file and renames the temp file into place, also into the root. On any error the temp file is deleted, the old file stays and the reply is `IO`. An empty text is allowed. `SK/config.txt` is reachable too, and written just as safely.
+- No delete and no listing: a host that wants a file gone writes it empty.
 
 ## 6. File format
 
@@ -313,7 +329,7 @@ No libDaisy changes were needed:
 ### 7.4 Transfer service (new `src/transfer/`, added to the Makefile `CPP_SOURCES`)
 - **`protocol.h`:** constants, command and status enums, little-endian helpers, CRC-32 (table based).
 - **`link`:** CDC RX callback (USB ISR) appends to an RX buffer in SDRAM (`MAX_PAYLOAD + 12`, 32-byte aligned). It sets an overflow flag if the buffer fills. Also handles frame parsing and CRC, and builds TX frames in a second SDRAM buffer of the same size.
-- **`service`:** the session state machine (`idle`, `uploading`, `downloading`), the command handlers (§5.3), and the 10 s inactivity timer. The settings paths (`kStorageConfigPath`, `kStorageConfigTempPath`) are in `src/memory/slots.h` and are shared with `Storage`. A leftover `config.tmp` is deleted together with the slot temp files. It runs from the main loop. Each command finishes within one `process()` call; at most 32 KB of SD I/O happens per call.
+- **`service`:** the session state machine (`idle`, `uploading`, `downloading`), the command handlers (§5.3), and the 10 s inactivity timer. The settings paths (`kStorageConfigPath`, `kStorageConfigTempPath`) are in `src/memory/slots.h` and are shared with `Storage`. A leftover `config.tmp` or `file.tmp` (`kStorageFileTempPath`, §5.7) is deleted together with the slot temp files. It runs from the main loop. Each command finishes within one `process()` call; at most 32 KB of SD I/O happens per call.
 
 ### 7.5 App, storage, UI, MIDI
 - **`USBTransfer`** (`src/transfer/usb.transfer.*`) runs the mode switch. `AppImpl` owns it and constructs it with references to `Hardware`, `Core`, `CoreUI` and `Storage`.
