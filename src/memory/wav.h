@@ -1,5 +1,8 @@
 #pragma once
 
+#include <stddef.h>
+#include <stdint.h>
+
 //https://en.wikipedia.org/wiki/WAV
 
 struct WavHeader {
@@ -30,12 +33,34 @@ bool wav_header(
     uint32_t size,
     WavHeader& header,
     size_t& header_size,
-    uint8_t* out_cue_count,
+    uint16_t* out_cue_count,
     uint32_t cue_limit);
 
 void find_cue_points(
     uint8_t* in_bytes, 
     size_t* out_cue_points, 
-    uint8_t* out_cue_count,
+    uint16_t* out_cue_count,
     const uint32_t cue_limit,
     const uint32_t size);
+
+struct WavInfo {
+    uint16_t audio_format;
+    uint16_t channels;
+    uint32_t sample_rate;
+    uint16_t block_align;
+    uint16_t bits_per_sample;
+    uint32_t data_offset;   // first byte of audio
+    uint32_t data_size;     // as declared by the "data" chunk
+    uint16_t cue_count;     // cue points found before "data"
+    uint8_t  name_length;   // LIST/INFO/INAM, without trailing NULs
+    char     name[64];
+};
+
+/*
+Parses chunks up to and including the "data" header.
+Returns false if it's not a RIFF/WAVE or "fmt "/"data" are missing in the bytes.
+*/
+bool wav_info(const uint8_t* in_bytes, const uint32_t size, WavInfo& out_info);
+
+/* Number of cue points in the "cue " chunk found among the chunks in the bytes, 0 if none. */
+uint16_t wav_cue_count(const uint8_t* in_bytes, const uint32_t size);

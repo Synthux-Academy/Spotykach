@@ -6,35 +6,17 @@
 
 using namespace spotykach;
 
-static const std::string kRootDir = "SK";
 static const std::string A = "A";
 static const std::string B = "B";
-static const std::string kTapeName[kStorageSlotCount] = { 
-    "B", // B lue
-    "G", // G reen
-    "P", // P ink
-    "R", // R ed
-    "T", // T urquose
-    "Y"  // Y ellow
-};
-static const std::string kSlotName[kStorageSlotCount] = { "1", "2", "3", "4", "5", "6" };
 
 inline void audio_file_name(const uint8_t slot_idx, char* out_name)
 {
-    #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-    #pragma GCC diagnostic ignored "-Wuninitialized"
-    sprintf(out_name, "%s.wav", (char*)kSlotName[slot_idx].c_str());
+    sprintf(out_name, "%s.wav", storage_slot_name(slot_idx));
 }
 
 inline void audio_file_path(const Deck::Ref deck, const uint8_t tape_idx, const uint8_t slot_idx, char* out_path)
 {
-    sprintf(
-        out_path, 
-        "/%s/%s/%s.wav", 
-        (char*)kRootDir.c_str(),
-        (char*)kTapeName[tape_idx].c_str(),
-        (char*)kSlotName[slot_idx].c_str()
-    );
+    storage_slot_path(tape_idx, slot_idx, ".wav", out_path);
 }
 
 DeckStorage::DeckStorage():
@@ -87,7 +69,7 @@ void DeckStorage::previous_tape()
 void DeckStorage::_read_slots()
 {
     if (_state != State::selecting) return;
-    char audio_path[11]; // /A/G/1.wav
+    char audio_path[16]; // /SK/G/1.wav
     for (size_t i = 0; i < _slots.size(); i++) {
         audio_file_path(_deck->ref, _tape_idx, i, audio_path);
         _slots[i].is_empty = !_card->file_exists(audio_path);
@@ -117,11 +99,11 @@ void DeckStorage::save()
     ad.header = reinterpret_cast<uint8_t*>(&header);
     ad.header_size = sizeof(header);
     
-    ad.root_dir = (char *)kRootDir.c_str();
+    ad.root_dir = (char *)storage_root_dir();
     ad.deck_dir = (char *)_deck_dir.c_str();
-    ad.tape_dir = (char*)kTapeName[_tape_idx].c_str();
+    ad.tape_dir = (char*)storage_tape_name(_tape_idx);
 
-    char name[5];
+    char name[8]; // 1.wav
     audio_file_name(_slot_idx, name);
     ad.file_name = name;
     
@@ -148,11 +130,11 @@ void DeckStorage::load()
     ad.body = reinterpret_cast<uint8_t*>(audio);
     ad.body_size = body_size;
 
-    ad.root_dir = (char *)kRootDir.c_str();
+    ad.root_dir = (char *)storage_root_dir();
     ad.deck_dir = (char *)_deck_dir.c_str();
-    ad.tape_dir = (char*)kTapeName[_tape_idx].c_str();
+    ad.tape_dir = (char*)storage_tape_name(_tape_idx);
     
-    char name[5];
+    char name[8]; // 1.wav
     audio_file_name(_slot_idx, name);
     ad.file_name = name;
     
@@ -178,7 +160,7 @@ void DeckStorage::preload()
 {
     uint8_t tape, slot;
     if (!_read_preload_source(tape, slot)) return;
-    char audio_path[11]; // /SK/G/1.wav
+    char audio_path[16]; // /SK/G/1.wav
     audio_file_path(_deck->ref, tape, slot, audio_path);
     if (_card->file_exists(audio_path)) {
         _tape_idx = tape;
