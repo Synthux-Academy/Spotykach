@@ -64,7 +64,8 @@ void USBTransfer::_enter()
     midi.reply_transfer(static_cast<uint8_t>(EnterStatus::ok));
     auto start = System::GetNow();
     while (midi.is_transfer_reply_pending() && System::GetNow() - start < 100) {}
-    System::Delay(20);
+    // Gives the page time to close its MIDI ports before the device leaves USB
+    System::Delay(150);
 
     // From here on the audio callback is silent and doesn't touch USB MIDI
     _is_active = true;

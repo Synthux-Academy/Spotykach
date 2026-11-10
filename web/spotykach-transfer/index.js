@@ -933,10 +933,23 @@ export async function enterTransferMode({ onStep = () => {} } = {}) {
   const inputs = [...access.inputs.values()].filter(isSpotykach);
   if (!output) throw new MidiPortNotFoundError();
 
+  // Ports left open while the device leaves USB can wedge Chrome's MIDI service on Windows
+  // until the browser quits, so they're closed as soon as the reply is in, and on every exit
+  let closed = false;
+  const closePorts = () => {
+    if (closed) return;
+    closed = true;
+    for (const port of [output, ...inputs]) {
+      port.onmidimessage = null;
+      Promise.resolve(port.close?.()).catch(() => {});
+    }
+  };
+
   try {
     await within(Promise.all([output.open(), ...inputs.map(input => input.open())]), MIDI_OPEN_MS,
       `The MIDI port didn't open within ${MIDI_OPEN_MS / 1000} s.`);
   } catch (e) {
+    closePorts();
     throw new Error("Can't open the Spotykach MIDI port." + portHint(), { cause: e });
   }
 
@@ -947,6 +960,7 @@ export async function enterTransferMode({ onStep = () => {} } = {}) {
     input.onmidimessage = e => {
       if (!isReply(e.data)) return;
       status = e.data[5];
+      closePorts();
       onReply();
     };
   }
@@ -973,7 +987,7 @@ export async function enterTransferMode({ onStep = () => {} } = {}) {
       });
     }
   } finally {
-    for (const input of inputs) input.onmidimessage = null;
+    closePorts();
   }
 
   if (status === null) {

@@ -57,7 +57,7 @@ This is not USB mass storage. The device switches into a dedicated **transfer mo
 3. The firmware checks the preconditions, in order:
    - Startup preload is finished, no deck is `loading` or `saving`, and no deck is recording. Otherwise it replies `BUSY` and stays in normal mode.
    - The card can be recognised and mounted, using the same recognise/wait/mount pattern as `Storage::activate` (3 attempts, about 600 ms). Otherwise it replies `NO_CARD` and stays in normal mode.
-4. The firmware replies with SysEx `OK`, flushes MIDI TX, and waits at least 20 ms.
+4. The firmware replies with SysEx `OK`, flushes MIDI TX, and waits 150 ms, so the page can close its MIDI ports before the device leaves USB (§8.2).
 5. The firmware enters transfer mode:
    - Any deck in `selecting` is deactivated. On exit, the next `activate()` re-reads the slots, so slot state is always fresh. This meets the "refresh like `_on_audio_saved`" requirement.
    - Both decks are stopped while the audio callback is still running, so the stop command is processed. After that the audio callback outputs silence and skips `CoreUI::tick` and `Core::process`; with `CoreUI::tick` skipped, nothing touches USB MIDI. The TIM5 callback also skips gate input and `Core::prepare`.
@@ -374,7 +374,7 @@ The page, with the package next to it, is deployed to GitHub Pages manually by `
 1. The user clicks **Connect**. If a granted serial port is already present (the device is still in transfer mode, e.g. after a page reload), the page opens it straight away and skips the SysEx.
 2. The page calls `requestMIDIAccess({ sysex: true })`. Chrome shows a permission prompt on first use.
 3. The page picks the output port whose name contains `Spotykach`. If there are several, it asks the user to choose.
-4. It sends the enter SysEx and waits for the reply. On `BUSY` or `NO_CARD` it shows the matching error.
+4. It sends the enter SysEx and waits for the reply. On `BUSY` or `NO_CARD` it shows the matching error. It closes the Spotykach MIDI ports as soon as the reply arrives, and on every other way out: on Windows, Chrome's MIDI service can hang until the browser quits when a port is still open while its device leaves USB, and every later `requestMIDIAccess` then never settles.
 5. It waits up to 5 s for the serial device:
    - **Already granted** (`navigator.serial.getPorts()` filtered to the VID/PID): it polls every 250 ms for up to 2.5 s and opens the port as soon as it appears.
    - **First use** (no granted port within 2.5 s): the page calls `requestPort({ filters: [{ usbVendorId: 0x0483, usbProductId: 0x5740 }] })` straight away while the Connect click still counts as a user gesture (`navigator.userActivation.isActive`, about 5 s in Chrome). Otherwise it shows **"Authorise Spotykach serial port"** for a fresh click. If the picker is closed without a selection, the button stays, and the device keeps waiting for up to 60 s. After the first time the step is automatic.
