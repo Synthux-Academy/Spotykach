@@ -18,7 +18,11 @@ function midiAccess(ports) {
   return { inputs: map("input"), outputs: map("output") };
 }
 
-const spotykachPort = (type, open = async () => {}) => ({ type, name: "Spotykach", state: "connected", open, send() {} });
+const spotykachPort = (type, open = async () => {}) => ({
+  type, name: "Spotykach", state: "connected", open, send() {},
+  closed: 0,
+  async close() { this.closed++; },
+});
 
 beforeEach(() => mock.timers.enable({ apis: ["setTimeout"] }));
 afterEach(() => mock.timers.reset());
@@ -48,6 +52,45 @@ test("a MIDI port that never opens times out", async () => {
   await flush();
   mock.timers.tick(5000);
   await result;
+});
+
+test("ports are closed when one of them doesn't open", async () => {
+  const output = spotykachPort("output", () => never);
+  const input = spotykachPort("input");
+  fakeNavigator({ access: Promise.resolve(midiAccess([output, input])) });
+  const result = assert.rejects(enterTransferMode(), /Can't open the Spotykach MIDI port/);
+  await flush();
+  mock.timers.tick(5000);
+  await result;
+  assert.deepEqual([output.closed, input.closed], [1, 1]);
+});
+
+test("ports are closed as soon as the reply arrives, before the device leaves USB", async () => {
+  const input = spotykachPort("input");
+  let closedAtReply;
+  const reply = () => {
+    input.onmidimessage({ data: [0xF0, 0x7D, 0x53, 0x4B, 0x02, 0, 0xF7] });
+    closedAtReply = [output.closed, input.closed];
+  };
+  const output = { ...spotykachPort("output"), send: () => queueMicrotask(reply) };
+  fakeNavigator({ access: Promise.resolve(midiAccess([input, output])) });
+  await enterTransferMode();
+  assert.deepEqual(closedAtReply, [1, 1]);
+  assert.deepEqual([output.closed, input.closed], [1, 1]);
+  assert.equal(input.onmidimessage, null);
+});
+
+test("ports are closed when the device doesn't reply", async () => {
+  const input = spotykachPort("input");
+  const output = spotykachPort("output");
+  fakeNavigator({ access: Promise.resolve(midiAccess([input, output])) });
+  const result = assert.rejects(enterTransferMode(), /didn't respond/);
+  await flush();
+  mock.timers.tick(2000);
+  await flush();
+  mock.timers.tick(3000);
+  await result;
+  assert.deepEqual([output.closed, input.closed], [1, 1]);
 });
 
 test("each step of a switch is reported", async () => {
