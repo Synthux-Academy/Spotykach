@@ -10,13 +10,15 @@ Host side of the Spotykach USB sample transfer protocol, for web apps in Chromiu
 
 It lives in the [Spotykach firmware repository](https://github.com/Synthux-Academy/Spotykach) next to the firmware side (`src/transfer/`), so both sides change together. [`docs/usb-transfer.md`](../../docs/usb-transfer.md) describes the protocol.
 
+The frames, the SysEx switch, loss recovery and connecting come from [`@synthuxacademy/usb-transfer`](https://github.com/Synthux-Academy/usb-transfer), which other Synthux instruments share; this package adds Spotykach's commands, settings and WAV handling. `DEVICE` is Spotykach's description for that package, and `SkLink` extends its `Link`.
+
 ## Install
 
 ```sh
 npm install @synthuxacademy/spotykach-transfer
 ```
 
-It's a single framework-free ES module with TypeScript types and no dependencies. Without a bundler, import `index.js` directly.
+It's a single framework-free ES module with TypeScript types. Its one dependency is `@synthuxacademy/usb-transfer`, also a single module. Without a bundler, import `index.js` directly and map `@synthuxacademy/usb-transfer` to that package's `index.js` with an import map, as `web/index.html` does.
 
 ## Use
 
@@ -96,11 +98,11 @@ From the repository root:
 tests/transfer/run.sh
 ```
 
-This builds the firmware's transfer code for the host (C++17 compiler needed) and runs this package against it with Node 20+, including dropped, cut and corrupted frames.
+This builds the firmware's transfer code for the host (C++17 compiler needed) and runs this package against it with Node 20+, including dropped, cut and corrupted frames. It needs the `lib/usb-transfer` submodule (`git submodule update --init lib/usb-transfer`) and links it into `node_modules/` for Node.
 
 ### Releasing
 
-1. Update `version` in `package.json` and the table above, and commit.
+1. Update `version` in `package.json` and the table above, and commit. If it needs a newer `@synthuxacademy/usb-transfer`, publish that first and raise the dependency.
 2. Push a tag `spotykach-transfer-v<version>`, e.g. `spotykach-transfer-v1.0.1`.
 
 The publish workflow (`.github/workflows/transfer-publish.yml`) runs the tests, checks that the tag matches `package.json`, and publishes to npm through trusted publishing, with no token. The package's npm settings list this repository and workflow as its trusted publisher.

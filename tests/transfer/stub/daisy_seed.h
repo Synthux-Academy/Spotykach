@@ -20,5 +20,5 @@ class UsbHandle { public:
   enum UsbPeriph { FS_INTERNAL, FS_EXTERNAL, FS_BOTH }; enum class Result { OK, ERR };
   typedef void (*ReceiveCallback)(uint8_t*, uint32_t*);
   void Init(UsbPeriph) {} void DeInit(UsbPeriph) {}
-  Result TransmitExternal(uint8_t*, size_t); void SetReceiveCallback(ReceiveCallback, UsbPeriph); };
+  Result TransmitInternal(uint8_t*, size_t); Result TransmitExternal(uint8_t*, size_t); void SetReceiveCallback(ReceiveCallback, UsbPeriph); };
 }

@@ -21,7 +21,10 @@ APP_TYPE = BOOT_SRAM
 LDSCRIPT = alt_sram.lds
 BOOT_BIN = bootloader-spotykach-v2.bin
 
-C_INCLUDES = -Isrc/ -Ilib/ \
+# lib/usb-transfer: the shared USB transfer protocol (submodule), see src/transfer/
+USB_TRANSFER_DIR = lib/usb-transfer/cpp
+
+C_INCLUDES = -Isrc/ -Ilib/ -I$(USB_TRANSFER_DIR) \
 	-I$(LIBDAISY_DIR)/Middlewares/Patched/ST/STM32_USB_Device_Library/Class/CDC/Inc
 C_USR_FLAGS = -ffast-math -funroll-loops
 C_DEFS += -DINFS_LOG_TARGET=daisy::LOGGER_EXTERNAL
@@ -38,7 +41,8 @@ CPP_SOURCES = \
 	$(wildcard src/hw/*.cpp) \
 	$(wildcard src/ui/*.cpp) \
 	$(wildcard src/memory/*.cpp) \
-	$(wildcard src/transfer/*.cpp)
+	$(wildcard src/transfer/*.cpp) \
+	$(wildcard $(USB_TRANSFER_DIR)/usb_transfer/*.cpp)
 
 # Core location, and generic Makefile.
 SYSTEM_FILES_DIR = $(LIBDAISY_DIR)/core

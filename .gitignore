@@ -4,3 +4,4 @@
 **/build
 *.log
 *.mmon
+node_modules

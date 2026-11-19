@@ -1,5 +1,6 @@
-// Device side of the transfer tests: the firmware's Service/Link/Card/wav code on
-// the host, FatFS on a directory (fatfs_stub.cpp), USB CDC on stdin/stdout.
+// Device side of the transfer tests: the firmware's Service/Card/wav code and
+// lib/usb-transfer's Server/Link on the host, FatFS on a directory
+// (fatfs_stub.cpp), USB CDC on stdin/stdout.
 //
 // usage: harness <card root>
 // FAULT environment variable, for the retry paths:
@@ -24,6 +25,7 @@ extern int g_dma_violations;
 extern "C" {
     uint8_t usbd_mode = 0;
     USBD_HandleTypeDef hUsbDeviceHS { nullptr };
+    USBD_HandleTypeDef hUsbDeviceFS { nullptr };
 }
 
 static daisy::UsbHandle::ReceiveCallback g_rx = nullptr;
@@ -55,6 +57,13 @@ daisy::UsbHandle::Result daisy::UsbHandle::TransmitExternal(uint8_t* buf, size_t
         off += written;
     }
     return Result::OK;
+}
+
+// Spotykach uses the external (rear) port only
+daisy::UsbHandle::Result daisy::UsbHandle::TransmitInternal(uint8_t*, size_t)
+{
+    fprintf(stderr, "harness: write on the internal port\n");
+    abort();
 }
 
 void daisy::UsbHandle::SetReceiveCallback(ReceiveCallback cb, UsbPeriph) { g_rx = cb; }

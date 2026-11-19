@@ -1,4 +1,4 @@
-// Host stand-in for the USB CDC class header used by transfer/link.cpp.
+// Host stand-in for the USB CDC class header used by lib/usb-transfer's link.cpp.
 #pragma once
 #include <cstdint>
 typedef struct { uint32_t TxState; } USBD_CDC_HandleTypeDef;

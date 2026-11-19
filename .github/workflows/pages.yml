@@ -30,6 +30,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
+      # web/usb-transfer is a symlink to the submodule's js/: put the real files there
+      # (refs from before the submodule don't have it)
+      - run: |
+          if [ -L web/usb-transfer ]; then
+            git submodule update --init lib/usb-transfer
+            rm web/usb-transfer
+            cp -R lib/usb-transfer/js web/usb-transfer
+          fi
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -37,17 +37,9 @@ bool CoreMIDI::process()
     }
 
     if (_transfer_reply >= 0) {
-        using namespace transfer;
-        const uint8_t reply[] = { 
-            0xF0, 
-            kSysExManufacturer, 
-            kSysExSignature[0], 
-            kSysExSignature[1], 
-            kSysExReply, 
-            static_cast<uint8_t>(_transfer_reply), 
-            0xF7 
-        };
-        _hw.midi_usb.SendMessage(reply, sizeof(reply));
+        uint8_t reply[usb_transfer::sysex::kReplySize];
+        auto size = usb_transfer::sysex::reply(transfer::kSysExSignature, static_cast<uint8_t>(_transfer_reply), reply);
+        _hw.midi_usb.SendMessage(reply, size);
         _transfer_reply = -1;
     }
     #endif
@@ -103,14 +95,8 @@ void CoreMIDI::_process_note_on(daisy::NoteOnEvent& note_on)
 
 void CoreMIDI::_process_sysex(daisy::MidiEvent& event)
 {
-    using namespace transfer;
     // Data comes without the F0/F7 framing
-    auto data = event.sysex_data;
-    if (event.sysex_message_len == 4
-        && data[0] == kSysExManufacturer
-        && data[1] == kSysExSignature[0]
-        && data[2] == kSysExSignature[1]
-        && data[3] == kSysExEnter) {
+    if (usb_transfer::sysex::is_enter(transfer::kSysExSignature, event.sysex_data, event.sysex_message_len)) {
         _transfer_requested = true;
     }
 }

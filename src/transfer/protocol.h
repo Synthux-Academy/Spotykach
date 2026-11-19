@@ -2,21 +2,21 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "usb_transfer/protocol.h"
+#include "usb_transfer/sysex.h"
 
 /*
-USB sample transfer protocol, see docs/usb-transfer.md.
-All multi-byte values are little-endian.
+USB sample transfer protocol, see docs/usb-transfer.md. The frames, CRC, frame
+errors and HELLO/PING/EXIT are the shared part in lib/usb-transfer; this is
+what Spotykach adds. All multi-byte values are little-endian.
 */
 namespace spotykach::transfer {
 
 static constexpr uint8_t kProtoMajor = 1;
 static constexpr uint8_t kProtoMinor = 2; // 1.1: config_read, config_write; 1.2: file_read, file_write
 
-// SysEx trigger: F0 7D 53 4B <cmd> F7 /////////////
-static constexpr uint8_t kSysExManufacturer = 0x7D; // non-commercial
-static constexpr uint8_t kSysExSignature[2] = { 0x53, 0x4B }; // "SK"
-static constexpr uint8_t kSysExEnter = 0x01;
-static constexpr uint8_t kSysExReply = 0x02;
+// SysEx trigger: F0 7D 53 4B <cmd> F7, see usb_transfer/sysex.h
+static constexpr auto kSysExSignature = usb_transfer::sysex::signature('S', 'K');
 
 enum class EnterStatus: uint8_t {
     ok      = 0,
@@ -26,19 +26,21 @@ enum class EnterStatus: uint8_t {
 
 // Frame ///////////////////////////////////////////
 static constexpr uint8_t  kMagic[2] = { 0x53, 0x4B }; // "SK"
-static constexpr size_t   kHeaderSize = 12;
 static constexpr size_t   kMaxChunk = 32768;
 static constexpr size_t   kMaxPayload = kMaxChunk + 16;
-static constexpr size_t   kMaxFrame = kHeaderSize + kMaxPayload;
-static constexpr uint8_t  kResponseFlag = 0x80;
-static constexpr uint8_t  kFrameErrorType = 0x80; // response to the reserved command 0x00
+static constexpr size_t   kMaxFrame = usb_transfer::frame_size(kMaxPayload);
 static constexpr uint32_t kMaxNameLength = 64;
 // FILE_READ / FILE_WRITE: the path field that starts the payload, and the largest file
 static constexpr size_t   kFileNameSize = 32;
 static constexpr size_t   kMaxFileSize = kMaxChunk - kFileNameSize;
 
+using usb_transfer::kHeaderSize;
+using usb_transfer::kResponseFlag;
+using usb_transfer::kFrameErrorType;
+using usb_transfer::FrameError;
+
+// hello, ping and exit are answered by usb_transfer::Server
 enum class Command: uint8_t {
-    // 0x00 is reserved, its response type marks frame errors
     hello          = 0x01,
     ping           = 0x02,
     list           = 0x03,
@@ -57,6 +59,7 @@ enum class Command: uint8_t {
     exit           = 0x7F
 };
 
+// 0–4 are the shared codes (usb_transfer::Status)
 enum class Status: uint8_t {
     ok          = 0,
     bad_frame   = 1,
@@ -72,29 +75,18 @@ enum class Status: uint8_t {
     bad_crc     = 11,
     bad_format  = 12
 };
-
-// Why a frame was rejected: second payload byte of a BAD_FRAME reply (type kFrameErrorType)
-enum class FrameError: uint8_t {
-    unknown    = 0,
-    crc        = 1, // checksum mismatch, bytes changed on the way
-    stale      = 2, // a partial frame stopped arriving
-    overflow   = 3, // more data than the receive buffer holds
-    bad_length = 4  // header announces a payload above kMaxPayload
-};
+static_assert(static_cast<uint8_t>(Status::no_card) == usb_transfer::kFirstDeviceStatus, "device codes follow the shared ones");
 
 // List entry flags
 static constexpr uint8_t kSlotOccupied = 1 << 0;
 static constexpr uint8_t kSlotLoadable = 1 << 1;
 static constexpr uint8_t kSlotParsed   = 1 << 2;
 
-// CRC-32 (IEEE 802.3, same as zlib) ///////////////
-uint32_t crc32_update(uint32_t crc, const uint8_t* data, size_t size);
-inline uint32_t crc32(const uint8_t* data, size_t size) { return crc32_update(0, data, size); }
-
-// Little-endian helpers ///////////////////////////
-inline uint16_t get_u16(const uint8_t* p) { return p[0] | (p[1] << 8); }
-inline uint32_t get_u32(const uint8_t* p) { return p[0] | (p[1] << 8) | (p[2] << 16) | ((uint32_t)p[3] << 24); }
-inline void put_u16(uint8_t* p, uint16_t v) { p[0] = v; p[1] = v >> 8; }
-inline void put_u32(uint8_t* p, uint32_t v) { p[0] = v; p[1] = v >> 8; p[2] = v >> 16; p[3] = v >> 24; }
+using usb_transfer::crc32_update;
+using usb_transfer::crc32;
+using usb_transfer::get_u16;
+using usb_transfer::get_u32;
+using usb_transfer::put_u16;
+using usb_transfer::put_u32;
 
 };
