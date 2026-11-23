@@ -14,7 +14,7 @@
   "files": ["index.js", "index.d.ts", "README.md", "LICENSE"],
   "sideEffects": false,
   "dependencies": {
-    "@synthuxacademy/usb-transfer": "^1.0.0"
+    "@synthuxacademy/usb-transfer": "^1.1.0"
   },
   "keywords": ["spotykach", "synthux", "synthuxacademy", "web-serial", "web-midi", "wav"],
   "license": "MIT",
