@@ -143,9 +143,13 @@ export class SkLink extends Link {
     super(port, device);
   }
 
-  /** Opens the port, retrying while the device is still enumerating. Doesn't talk to it yet. */
-  static open(port) {
-    return super.open(port, DEVICE);
+  /**
+   * Opens the port, retrying while the device is still enumerating. Doesn't talk to it yet.
+   * `handshake` calls `open(port, device, { fresh })`: the options go on, so a port that
+   * just appeared gets the longer Linux wait.
+   */
+  static open(port, _device, options) {
+    return super.open(port, DEVICE, options);
   }
 
   /** All slots, empty ones included (flag SLOT_OCCUPIED clear). */
