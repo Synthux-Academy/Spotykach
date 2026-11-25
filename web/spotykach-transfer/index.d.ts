@@ -1,6 +1,6 @@
 // Types for @synthuxacademy/spotykach-transfer.
 
-import { SerialPortLike, Link, Device } from "@synthuxacademy/usb-transfer";
+import { SerialPortLike, Link, Device, OpenOptions } from "@synthuxacademy/usb-transfer";
 
 export type { SerialPortLike } from "@synthuxacademy/usb-transfer";
 /** The shared protocol's errors and helpers, re-exported. */
@@ -83,7 +83,7 @@ export type RangeReader = (offset: number, length: number, options?: TransferOpt
 /** Request, keep-alive, hello, exit and close come from the shared `Link`. */
 export declare class SkLink extends Link<DeviceInfo> {
   constructor(port: SerialPortLike, device?: Device<DeviceInfo>);
-  static open(port: SerialPortLike): Promise<SkLink>;
+  static open(port: SerialPortLike, device?: Device<any>, options?: OpenOptions): Promise<SkLink>;
 
   list(): Promise<SlotEntry[]>;
   /** Requires `hello()` first. Checks the file with `checkUploadable` before sending. */
