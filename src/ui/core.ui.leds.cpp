@@ -376,7 +376,7 @@ void CoreUI::_draw_ring(const Deck::Ref ref)
             segment_start -= segment_size * .5f;
         }
         else {
-            segment_size = deck.voxs().norm_size();  
+            segment_size = std::max(deck.voxs().norm_size(), .035f);  
         }
         ring.set_segment(segment_start, segment_start + segment_size);
         // PLAYHEADS /////////////////////////////////////////////////
