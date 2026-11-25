@@ -4,3 +4,6 @@
 [submodule "lib/libDaisy"]
 	path = lib/libDaisy
 	url = https://github.com/bleeptools/libDaisy.git
+[submodule "lib/usb-transfer"]
+	path = lib/usb-transfer
+	url = https://github.com/Synthux-Academy/usb-transfer.git

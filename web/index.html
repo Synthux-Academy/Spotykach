@@ -147,6 +147,11 @@
     .settings-grid .wide, .settings-grid .sub { grid-column: 1 / -1; }
   }
 </style>
+<!-- spotykach-transfer imports the shared protocol package by name: usb-transfer/ is the
+     lib/usb-transfer submodule's js/ (a symlink here, copied in by the Pages workflow) -->
+<script type="importmap">
+{ "imports": { "@synthuxacademy/usb-transfer": "./usb-transfer/index.js" } }
+</script>
 </head>
 <body>
 <main>

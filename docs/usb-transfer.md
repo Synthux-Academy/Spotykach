@@ -305,7 +305,7 @@ The file is saved as `INAM` with its extension replaced by `.wav`. If there is n
 ### 7.1 libDaisy (submodule)
 No libDaisy changes were needed:
 - **MIDI is a mode of libDaisy's CDC class**, selected by the global `usbd_mode`, which is read when the host fetches the configuration descriptor. Switching works as follows:
-  - **to CDC:** `UsbHandle::DeInit(FS_EXTERNAL)` (`Hardware::StopUsbMidi`), then `usbd_mode = USBD_MODE_CDC`, then `UsbHandle::Init(FS_EXTERNAL)` and `SetReceiveCallback` (`transfer::Link::start`);
+  - **to CDC:** `UsbHandle::DeInit(FS_EXTERNAL)` (`Hardware::StopUsbMidi`), then `usbd_mode = USBD_MODE_CDC`, then `UsbHandle::Init(FS_EXTERNAL)` and `SetReceiveCallback` (`usb_transfer::Link::start`);
   - **back to MIDI:** `UsbHandle::DeInit(FS_EXTERNAL)`, then `MidiUsbHandler::Init` + `StartReceive` (`Hardware::StartUsbMidi`), which sets `usbd_mode = USBD_MODE_MIDI` itself.
   - A 200 ms pause between deinit and init lets the host register the disconnect.
 - **ZLP.** The patched CDC class already sends a zero-length packet when a transfer is a multiple of 64 bytes (`USBD_CDC_DataIn`).
@@ -326,10 +326,12 @@ No libDaisy changes were needed:
 - LIST reads the first 4 KB of each file, and up to 32 KB if `data` isn't found in that. It then reads 8 KB from `data_end`.
 - All chunk walkers stop when a chunk size would run past the buffer, so a corrupt size field can't make them loop.
 
-### 7.4 Transfer service (new `src/transfer/`, added to the Makefile `CPP_SOURCES`)
-- **`protocol.h`:** constants, command and status enums, little-endian helpers, CRC-32 (table based).
-- **`link`:** CDC RX callback (USB ISR) appends to an RX buffer in SDRAM (`MAX_PAYLOAD + 12`, 32-byte aligned). It sets an overflow flag if the buffer fills. Also handles frame parsing and CRC, and builds TX frames in a second SDRAM buffer of the same size.
-- **`service`:** the session state machine (`idle`, `uploading`, `downloading`), the command handlers (§5.3), and the 10 s inactivity timer. The settings paths (`kStorageConfigPath`, `kStorageConfigTempPath`) are in `src/memory/slots.h` and are shared with `Storage`. A leftover `config.tmp` or `file.tmp` (`kStorageFileTempPath`, §5.7) is deleted together with the slot temp files. It runs from the main loop. Each command finishes within one `process()` call; at most 32 KB of SD I/O happens per call.
+### 7.4 Transfer service (`src/transfer/` and the `lib/usb-transfer` submodule, both in the Makefile `CPP_SOURCES`)
+The part of the protocol other instruments share lives in the [usb-transfer](https://github.com/Synthux-Academy/usb-transfer) repository, a submodule at `lib/usb-transfer` (`git submodule update --init lib/usb-transfer`). Its `docs/protocol.md` describes that part; this spec stays the full description of Spotykach's protocol.
+- **`usb_transfer::Link`** (submodule): CDC RX callback (USB ISR) appends to the RX buffer. It sets an overflow flag if the buffer fills. Also handles frame parsing and CRC, and builds TX frames in the TX buffer. The service passes it two SDRAM buffers of `MAX_PAYLOAD + 12` bytes (32-byte aligned), the rear port (`Port::external`) and the magic `SK`.
+- **`usb_transfer::Server`** (submodule): polls the link, answers frame errors, `PING`, `EXIT` and the framing of `HELLO`, and runs the 10 s / 60 s inactivity timers. `usb_transfer/sysex.h` builds and checks the SysEx (`CoreMIDI`).
+- **`protocol.h`:** Spotykach's constants, command and status enums; CRC-32 and the little-endian helpers come from the submodule.
+- **`service`:** a `usb_transfer::Handler`: the session state machine (`idle`, `uploading`, `downloading`), the `HELLO` body and the other command handlers (§5.3). The settings paths (`kStorageConfigPath`, `kStorageConfigTempPath`) are in `src/memory/slots.h` and are shared with `Storage`. A leftover `config.tmp` or `file.tmp` (`kStorageFileTempPath`, §5.7) is deleted together with the slot temp files. It runs from the main loop. Each command finishes within one `process()` call; at most 32 KB of SD I/O happens per call.
 
 ### 7.5 App, storage, UI, MIDI
 - **`USBTransfer`** (`src/transfer/usb.transfer.*`) runs the mode switch. `AppImpl` owns it and constructs it with references to `Hardware`, `Core`, `CoreUI` and `Storage`.
@@ -344,7 +346,7 @@ No libDaisy changes were needed:
   - `set_transfer()` switches the pads and LEDs to transfer mode. All pads except Play A/B are ignored, and the LEDs show the transfer pattern: both rings breathing while idle, the progress of the current upload or download (at 0.5 brightness) while busy, and the Play pads lit.
   - `set_transfer_progress()` passes the progress for the rings.
 - **`Storage`:** `begin_transfer()` checks the preconditions, deactivates the decks, mounts the card and sets `Card::State::transfer`; `end_transfer()` undoes it.
-- **`Hardware`:** `StartUsbMidi()` / `StopUsbMidi()` on the rear port. CDC itself is started by `transfer::Link`. Transfer mode isn't available in `DEBUG` builds, where the port carries the logger.
+- **`Hardware`:** `StartUsbMidi()` / `StopUsbMidi()` on the rear port. CDC itself is started by `usb_transfer::Link`. Transfer mode isn't available in `DEBUG` builds, where the port carries the logger.
 
 ### 7.6 Version
 - The firmware version is a constant in `src/core/config.h`, next to the other `static constexpr` values in `namespace spotykach`:
@@ -360,7 +362,7 @@ No libDaisy changes were needed:
 
 Location: `web/index.html`, plain HTML/CSS with an inline module script and no build step.
 
-The protocol, connection and WAV code is the package **`@synthuxacademy/spotykach-transfer`** in `web/spotykach-transfer/`. It's a single framework-free ES module with TypeScript declarations, so other web apps can speak the protocol without copying it; WAV Builder is the first. The page imports it by relative path, so it is always the version in the same commit as the firmware. The package's major version follows the protocol major version. Its README covers the API and releasing: a tag `spotykach-transfer-v<version>` runs `.github/workflows/transfer-publish.yml`, which tests and publishes it to npm.
+The protocol, connection and WAV code is the package **`@synthuxacademy/spotykach-transfer`** in `web/spotykach-transfer/`. It's a single framework-free ES module with TypeScript declarations, so other web apps can speak the protocol without copying it; WAV Builder is the first. The page imports it by relative path, so it is always the version in the same commit as the firmware. It builds on the shared package **`@synthuxacademy/usb-transfer`** (the submodule's `js/`), which has the frames, the SysEx switch, loss recovery and connecting; the page maps that name to `web/usb-transfer`, a symlink to `lib/usb-transfer/js`, with an import map, and the Pages workflow copies the files in. On npm it is a dependency, so it has to be published before a `spotykach-transfer` release that needs a new version of it. The package's major version follows the protocol major version. Its README covers the API and releasing: a tag `spotykach-transfer-v<version>` runs `.github/workflows/transfer-publish.yml`, which tests and publishes it to npm.
 
 Locally the page must be served over HTTP, because browsers don't load ES modules from `file://`: `python3 -m http.server -d web 8000`, then open http://localhost:8000. Opened as a file, the page says so.
 
@@ -454,10 +456,10 @@ Cue points / slices:
 - `DeckStorage::save()` writes a bare 44-byte header, so re-saving on the device drops `INAM` and cue points.
 
 ## 11. Implementation status
-Everything in §3–§8 is implemented: firmware (`src/transfer/`, plus changes in `app.cpp`, `Card`, `Storage`, `CoreMIDI`, `CoreUI` and `Hardware`), `web/index.html`, and `.github/workflows/pages.yml`.
+Everything in §3–§8 is implemented: firmware (`src/transfer/` on `lib/usb-transfer`, plus changes in `app.cpp`, `Card`, `Storage`, `CoreMIDI`, `CoreUI` and `Hardware`), `web/index.html`, and `.github/workflows/pages.yml`.
 
 ### Tests (`tests/transfer/`, run by `run.sh` and in CI)
-The firmware's `service`, `link`, `card`, `wav` and `slots` sources are compiled for the host under AddressSanitizer/UBSan, with stubs for libDaisy, USB and FatFS (`stub/`, `fatfs_stub.cpp`). The FatFS stand-in keeps files in a directory and flags every read or write the SD DMA couldn't do.
+The firmware's `service`, `card`, `wav` and `slots` sources and the submodule's `usb_transfer/*.cpp` are compiled for the host under AddressSanitizer/UBSan, with stubs for libDaisy, USB and FatFS (`stub/`, `fatfs_stub.cpp`). The FatFS stand-in keeps files in a directory and flags every read or write the SD DMA couldn't do.
 
 - **`card_load_test`:** loads WAVs whose audio starts at every alignment, containing a NaN, an Inf and 255 cues, through `Card::init_read_audio`/`read_audio`. Checks the samples, NaN/Inf → 0, 256 slices, and no unaligned DMA.
 - **`harness`:** the device's transfer service on stdin/stdout. `transfer.test.mjs` runs `@synthuxacademy/spotykach-transfer` against it over a fake serial port. It covers:
@@ -469,7 +471,7 @@ The firmware's `service`, `link`, `card`, `wav` and `slots` sources are compiled
   - invalid requests, garbage on the line;
   - `encodeWav` alignment for every name length.
 
-`.github/workflows/transfer-tests.yml` runs them on every change to either side of the protocol.
+`.github/workflows/transfer-tests.yml` runs them on every change to either side of the protocol, including a new `lib/usb-transfer` commit. The usb-transfer repository has its own tests of the shared part (`test/run.sh`).
 
 ### Still to verify on hardware, in this order
 1. **The USB switch.** SysEx enter → serial port appears → `EXIT` → MIDI comes back, on macOS, Windows and Linux (risks §9.1–§9.4).

@@ -10,15 +10,15 @@
 using namespace spotykach;
 using namespace spotykach::transfer;
 
-static constexpr uint32_t kIdleTimeoutMs = 10000;
-// Before the first frame the user may still be picking the port in the browser
-static constexpr uint32_t kConnectTimeoutMs = 60000;
 static constexpr uint32_t kListHeaderRead = 4096;
 static constexpr uint32_t kListTailRead = 8192;
 static constexpr uint32_t kUploadOverhead = 65536; // header, name and cue chunks
 
 static constexpr const char* kWavExt = ".wav";
 static constexpr const char* kTempExt = ".tmp";
+
+static uint8_t DSY_SDRAM_BSS __attribute__((aligned(32))) _rx_buf[kMaxFrame];
+static uint8_t DSY_SDRAM_BSS __attribute__((aligned(32))) _tx_buf[kMaxFrame];
 
 static bool is_loadable(const WavInfo& info)
 {
@@ -35,23 +35,28 @@ void Service::init(Card* card, const uint32_t max_frames)
     _card = card;
     _max_frames = max_frames;
     _session = Session::idle;
-    _should_exit = false;
+
+    usb_transfer::Server::Config config;
+    config.link = {
+        usb_transfer::Link::Port::external,
+        { kMagic[0], kMagic[1] },
+        _rx_buf,
+        _tx_buf,
+        sizeof(_rx_buf)
+    };
+    _server.init(config, this);
 }
 
 void Service::begin()
 {
-    _should_exit = false;
     _session = Session::idle;
     _remove_temp_files();
-    _link.start();
-    _last_frame_ms = daisy::System::GetNow();
-    _is_connected = false;
+    _server.begin();
 }
 
 void Service::end()
 {
-    _reset_session();
-    _link.stop();
+    _server.end();
 }
 
 float Service::progress() const
@@ -62,38 +67,13 @@ float Service::progress() const
 
 void Service::process()
 {
-    if (_should_exit) return;
-
-    Link::Frame frame;
-    switch (_link.poll(frame)) {
-        case Link::Poll::none: break;
-        case Link::Poll::error:
-            // The broken frame wasn't processed, the session stays as it was
-            // so the host can resend it.
-            _link.payload()[0] = static_cast<uint8_t>(Status::bad_frame);
-            _link.payload()[1] = static_cast<uint8_t>(_link.last_error());
-            _link.send(kFrameErrorType, 0, 2);
-            break;
-        case Link::Poll::frame:
-            _last_frame_ms = daisy::System::GetNow();
-            _is_connected = true;
-            _handle(frame);
-            break;
-    }
-
-    auto timeout = _is_connected ? kIdleTimeoutMs : kConnectTimeoutMs;
-    if (daisy::System::GetNow() - _last_frame_ms > timeout) {
-        _should_exit = true;
-    }
+    _server.process();
 }
 
-void Service::_handle(const Link::Frame& frame)
+bool Service::handle(usb_transfer::Server&, const Frame& frame)
 {
     auto session = _session;
     switch (static_cast<Command>(frame.type)) {
-        case Command::hello: _hello(frame); break;
-        case Command::ping: _reply(frame, Status::ok); break;
-
         case Command::list:
             if (session != Session::idle) _reply(frame, Status::bad_state);
             else _list(frame);
@@ -159,22 +139,17 @@ void Service::_handle(const Link::Frame& frame)
             else _file_write(frame);
             break;
 
-        case Command::exit:
-            _reset_session();
-            _reply(frame, Status::ok);
-            _should_exit = true;
-            break;
-
-        default: _reply(frame, Status::unknown_cmd);
+        default: return false;
     }
+    return true;
 }
 
-void Service::_reply(const Link::Frame& frame, const Status status)
+void Service::_reply(const Frame& frame, const Status status)
 {
-    _link.send_status(frame.type | kResponseFlag, frame.seq, status);
+    _server.reply(frame, status);
 }
 
-bool Service::_slot_args(const Link::Frame& frame, uint8_t& tape, uint8_t& slot)
+bool Service::_slot_args(const Frame& frame, uint8_t& tape, uint8_t& slot)
 {
     if (frame.size < 4) return false;
     tape = frame.payload[0];
@@ -210,15 +185,14 @@ void Service::_remove_temp_files()
 }
 
 // HELLO ///////////////////////////////////////////
-void Service::_hello(const Link::Frame& frame)
+// The server has reset the session before
+void Service::hello(usb_transfer::Server&, const Frame& frame)
 {
-    _reset_session();
-
     uint32_t total_kib = 0;
     uint32_t free_kib = 0;
     auto has_space = _card->space_kib(total_kib, free_kib);
 
-    auto p = _link.payload();
+    auto p = _server.payload();
     std::memset(p, 0, 35);
     p[0] = static_cast<uint8_t>(has_space ? Status::ok : Status::no_card);
     p[1] = kProtoMajor;
@@ -234,7 +208,7 @@ void Service::_hello(const Link::Frame& frame)
     auto version_length = std::min(strlen(kFirmwareVersion), (size_t)255);
     p[34] = version_length;
     std::memcpy(&p[35], kFirmwareVersion, version_length);
-    _link.send(frame.type | kResponseFlag, frame.seq, 35 + version_length);
+    _server.send(frame, 35 + version_length);
 }
 
 // LIST ////////////////////////////////////////////
@@ -297,9 +271,9 @@ size_t Service::_list_entry(const uint8_t tape, const uint8_t slot, uint8_t* out
     return kEntrySize + name_length;
 }
 
-void Service::_list(const Link::Frame& frame)
+void Service::_list(const Frame& frame)
 {
-    auto p = _link.payload();
+    auto p = _server.payload();
     p[0] = static_cast<uint8_t>(Status::ok);
     p[1] = kStorageTapeCount * kStorageSlotCount;
     size_t size = 2;
@@ -308,11 +282,11 @@ void Service::_list(const Link::Frame& frame)
             size += _list_entry(tape, slot, &p[size]);
         }
     }
-    _link.send(frame.type | kResponseFlag, frame.seq, size);
+    _server.send(frame, size);
 }
 
 // UPLOAD //////////////////////////////////////////
-void Service::_upload_begin(const Link::Frame& frame)
+void Service::_upload_begin(const Frame& frame)
 {
     uint8_t tape, slot;
     if (frame.size < 12 || !_slot_args(frame, tape, slot)) {
@@ -365,16 +339,16 @@ void Service::_upload_begin(const Link::Frame& frame)
 
 /* UPLOAD_DATA replies carry the device's offset, so after a lost reply the host
 can tell whether the chunk was written and resend or continue accordingly. */
-void Service::_reply_upload(const Link::Frame& frame, const Status status)
+void Service::_reply_upload(const Frame& frame, const Status status)
 {
-    auto p = _link.payload();
+    auto p = _server.payload();
     p[0] = static_cast<uint8_t>(status);
     p[1] = p[2] = p[3] = 0;
     put_u32(&p[4], _offset);
-    _link.send(frame.type | kResponseFlag, frame.seq, 8);
+    _server.send(frame, 8);
 }
 
-void Service::_upload_data(const Link::Frame& frame)
+void Service::_upload_data(const Frame& frame)
 {
     if (frame.size < 4) {
         _reply_upload(frame, Status::bad_arg);
@@ -427,7 +401,7 @@ Status Service::_validate_upload()
     return is_valid ? Status::ok : Status::bad_format;
 }
 
-void Service::_upload_commit(const Link::Frame& frame)
+void Service::_upload_commit(const Frame& frame)
 {
     auto status = _validate_upload();
     if (status != Status::ok) {
@@ -453,7 +427,7 @@ void Service::_upload_commit(const Link::Frame& frame)
 }
 
 // DOWNLOAD ////////////////////////////////////////
-void Service::_download_open(const Link::Frame& frame)
+void Service::_download_open(const Frame& frame)
 {
     uint8_t tape, slot;
     if (!_slot_args(frame, tape, slot)) {
@@ -479,14 +453,14 @@ void Service::_download_open(const Link::Frame& frame)
     _offset = 0;
     _session = Session::downloading;
 
-    auto p = _link.payload();
+    auto p = _server.payload();
     p[0] = static_cast<uint8_t>(Status::ok);
     p[1] = p[2] = p[3] = 0;
     put_u32(&p[4], size);
-    _link.send(frame.type | kResponseFlag, frame.seq, 8);
+    _server.send(frame, 8);
 }
 
-void Service::_download_read(const Link::Frame& frame)
+void Service::_download_read(const Frame& frame)
 {
     if (frame.size < 8) {
         _reply(frame, Status::bad_arg);
@@ -509,7 +483,7 @@ void Service::_download_read(const Link::Frame& frame)
         return;
     }
 
-    auto p = _link.payload();
+    auto p = _server.payload();
     size_t got = 0;
     if ((offset != _card->tell() && !_card->seek(offset)) || !_card->read(&p[4], length, got)) got = 0;
     if (got != length) {
@@ -521,11 +495,11 @@ void Service::_download_read(const Link::Frame& frame)
 
     p[0] = static_cast<uint8_t>(Status::ok);
     p[1] = p[2] = p[3] = 0;
-    _link.send(frame.type | kResponseFlag, frame.seq, 4 + length);
+    _server.send(frame, 4 + length);
 }
 
 // DELETE //////////////////////////////////////////
-void Service::_remove(const Link::Frame& frame)
+void Service::_remove(const Frame& frame)
 {
     uint8_t tape, slot;
     if (!_slot_args(frame, tape, slot)) {
@@ -539,14 +513,14 @@ void Service::_remove(const Link::Frame& frame)
 
 // CONFIG //////////////////////////////////////////
 /* The settings file as text, up to a chunk: the device reads no more on power-on. */
-void Service::_config_read(const Link::Frame& frame)
+void Service::_config_read(const Frame& frame)
 {
     uint32_t size = 0;
     if (!_card->stat(kStorageConfigPath, size)) {
         _reply(frame, Status::not_found);
         return;
     }
-    auto p = _link.payload();
+    auto p = _server.payload();
     size_t got = 0;
     auto length = std::min(size, (uint32_t)kMaxChunk);
     // Read from position 0 into the word-aligned payload, see _download_read()
@@ -558,11 +532,11 @@ void Service::_config_read(const Link::Frame& frame)
     }
     p[0] = static_cast<uint8_t>(Status::ok);
     p[1] = p[2] = p[3] = 0;
-    _link.send(frame.type | kResponseFlag, frame.seq, 4 + length);
+    _server.send(frame, 4 + length);
 }
 
 /* Replaces the settings file through the temp file, so a failed write keeps the old one. */
-void Service::_config_write(const Link::Frame& frame)
+void Service::_config_write(const Frame& frame)
 {
     if (frame.size < 4 || frame.size - 4 > kMaxChunk) {
         _reply(frame, Status::bad_arg);
@@ -639,7 +613,7 @@ static bool file_path(const uint8_t* field, char* out_path)
     return true;
 }
 
-void Service::_file_read(const Link::Frame& frame)
+void Service::_file_read(const Frame& frame)
 {
     char path[kFileNameSize + 1];
     if (frame.size < kFileNameSize || !file_path(frame.payload, path)) {
@@ -655,7 +629,7 @@ void Service::_file_read(const Link::Frame& frame)
         _reply(frame, Status::too_large);
         return;
     }
-    auto p = _link.payload();
+    auto p = _server.payload();
     size_t got = 0;
     // Read from position 0 into the word-aligned payload, see _download_read()
     auto is_read = _card->open_read(path, size) && _card->read(&p[4], size, got);
@@ -666,11 +640,11 @@ void Service::_file_read(const Link::Frame& frame)
     }
     p[0] = static_cast<uint8_t>(Status::ok);
     p[1] = p[2] = p[3] = 0;
-    _link.send(frame.type | kResponseFlag, frame.seq, 4 + size);
+    _server.send(frame, 4 + size);
 }
 
 /* Replaces the file through the temp file, so a failed write keeps the old one. */
-void Service::_file_write(const Link::Frame& frame)
+void Service::_file_write(const Frame& frame)
 {
     char path[kFileNameSize + 1];
     if (frame.size < kFileNameSize || !file_path(frame.payload, path)) {

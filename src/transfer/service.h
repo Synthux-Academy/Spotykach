@@ -3,18 +3,22 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "hw/card.h"
-#include "link.h"
+#include "usb_transfer/server.h"
+#include "protocol.h"
 #include "nocopy.h"
 
 namespace spotykach::transfer {
 
 /*
-Transfer mode session: answers host requests over the Link
-and performs the file operations on the card.
+Transfer mode session: Spotykach's commands on top of usb_transfer::Server
+(lib/usb-transfer), which runs the link on the external (rear) port and
+answers HELLO's framing, PING, EXIT and frame errors.
 The card must be mounted and in Card::State::transfer.
 */
-class Service {
+class Service: public usb_transfer::Handler {
   public:
+    using Frame = usb_transfer::Link::Frame;
+
     Service() = default;
     ~Service() = default;
 
@@ -24,9 +28,14 @@ class Service {
     void end();
     void process();
 
-    bool should_exit() const { return _should_exit; }
+    bool should_exit() const { return _server.should_exit(); }
     bool is_busy() const { return _session != Session::idle; }
     float progress() const;
+
+    // usb_transfer::Handler
+    void hello(usb_transfer::Server&, const Frame&) override;
+    bool handle(usb_transfer::Server&, const Frame&) override;
+    void reset_session() override { _reset_session(); }
 
   private:
     NOCOPY(Service)
@@ -37,37 +46,32 @@ class Service {
       downloading
     };
 
-    void _handle(const Link::Frame&);
     void _reset_session();
     void _remove_temp_files();
 
-    void _hello(const Link::Frame&);
-    void _list(const Link::Frame&);
-    void _upload_begin(const Link::Frame&);
-    void _upload_data(const Link::Frame&);
-    void _upload_commit(const Link::Frame&);
-    void _download_open(const Link::Frame&);
-    void _download_read(const Link::Frame&);
-    void _remove(const Link::Frame&);
-    void _config_read(const Link::Frame&);
-    void _config_write(const Link::Frame&);
-    void _file_read(const Link::Frame&);
-    void _file_write(const Link::Frame&);
+    void _list(const Frame&);
+    void _upload_begin(const Frame&);
+    void _upload_data(const Frame&);
+    void _upload_commit(const Frame&);
+    void _download_open(const Frame&);
+    void _download_read(const Frame&);
+    void _remove(const Frame&);
+    void _config_read(const Frame&);
+    void _config_write(const Frame&);
+    void _file_read(const Frame&);
+    void _file_write(const Frame&);
 
     size_t _list_entry(const uint8_t tape, const uint8_t slot, uint8_t* out);
     Status _validate_upload();
-    void _reply(const Link::Frame&, const Status);
-    void _reply_upload(const Link::Frame&, const Status);
-    bool _slot_args(const Link::Frame&, uint8_t& tape, uint8_t& slot);
+    void _reply(const Frame&, const Status);
+    void _reply_upload(const Frame&, const Status);
+    bool _slot_args(const Frame&, uint8_t& tape, uint8_t& slot);
 
     Card*    _card;
-    Link     _link;
     uint32_t _max_frames;
+    usb_transfer::Server _server;
 
     Session  _session;
-    bool     _should_exit;
-    uint32_t _last_frame_ms;
-    bool     _is_connected;
 
     uint8_t  _tape;
     uint8_t  _slot;

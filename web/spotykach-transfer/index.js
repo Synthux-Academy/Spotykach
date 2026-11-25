@@ -6,8 +6,37 @@
  * ES module; the firmware side lives in src/transfer/ of the same repository, the
  * protocol is described in docs/usb-transfer.md.
  *
+ * The frames, the SysEx switch, loss recovery and connecting are the shared part,
+ * @synthuxacademy/usb-transfer (lib/usb-transfer); this module adds Spotykach's
+ * commands, settings and WAV handling, with the same API as before.
+ *
  * MIT License, Copyright (c) 2026 Synthux Academy
  */
+
+import {
+  defineDevice,
+  Link,
+  CMD as BASE_CMD,
+  STATUS as BASE_STATUS,
+  FRAME_ERROR,
+  DeviceError,
+  TimeoutError,
+  NeedsAuthorizationError,
+  MidiPortNotFoundError,
+  ProtocolMismatchError,
+  crc32,
+  isSupported,
+  grantedPort as baseGrantedPort,
+  enterTransferMode as baseEnterTransferMode,
+  handshake as baseHandshake,
+  connect as baseConnect,
+  authorizePort as baseAuthorizePort,
+} from "@synthuxacademy/usb-transfer";
+
+export {
+  FRAME_ERROR, DeviceError, TimeoutError, NeedsAuthorizationError, MidiPortNotFoundError,
+  ProtocolMismatchError, crc32, isSupported,
+};
 
 // Protocol ///////////////////////////////////////////////////////////////////
 
@@ -18,19 +47,11 @@ export const USB_PRODUCT_ID = 0x5740;
 export const PROTO_MAJOR = 1;
 export const PROTO_MINOR = 2;
 
-const SYSEX_ENTER = [0xF0, 0x7D, 0x53, 0x4B, 0x01, 0xF7];
-const SYSEX_REPLY_PREFIX = [0xF0, 0x7D, 0x53, 0x4B, 0x02];
-
-const MAGIC_0 = 0x53; // "S"
-const MAGIC_1 = 0x4B; // "K"
-const HEADER_SIZE = 12;
 const MAX_PAYLOAD = 32768 + 16;
-const RESPONSE_FLAG = 0x80;
-const FRAME_ERROR_TYPE = 0x80; // response type of the reserved command 0x00
 
 export const CMD = Object.freeze({
-  hello: 0x01,
-  ping: 0x02,
+  hello: BASE_CMD.hello,
+  ping: BASE_CMD.ping,
   list: 0x03,
   uploadBegin: 0x10,
   uploadData: 0x11,
@@ -44,15 +65,11 @@ export const CMD = Object.freeze({
   configWrite: 0x41,
   fileRead: 0x42,
   fileWrite: 0x43,
-  exit: 0x7F,
+  exit: BASE_CMD.exit,
 });
 
 export const STATUS = Object.freeze({
-  ok: 0,
-  badFrame: 1,
-  unknownCmd: 2,
-  badState: 3,
-  badArg: 4,
+  ...BASE_STATUS,
   noCard: 5,
   io: 6,
   notFound: 7,
@@ -80,17 +97,6 @@ export const STATUS_TEXT = Object.freeze([
   "Spotykach rejected the file format.",
 ]);
 
-/** Why the device rejected a frame: `DeviceError.frameError` of a BAD_FRAME from the device */
-export const FRAME_ERROR = Object.freeze({
-  unknown: 0,
-  crc: 1,       // checksum mismatch, bytes changed on the way
-  stale: 2,     // a partial request stopped arriving
-  overflow: 3,  // more data than the device's receive buffer holds
-  badLength: 4, // the header announced a payload that's too large
-});
-
-const FRAME_ERROR_TEXT = ["", "checksum mismatch", "the request stopped arriving", "receive buffer overflow", "invalid length"];
-
 /** DOWNLOAD_READ offsets must be multiples of this; `readSlot` ranges are aligned for you. */
 export const SECTOR_SIZE = 512;
 
@@ -102,133 +108,25 @@ export const SLOT_PARSED = 1 << 2;
 /** The only format the device loads */
 export const DEVICE_FORMAT = Object.freeze({ sampleRate: 48000, channels: 2, bitsPerSample: 32, audioFormat: 3 });
 
-// Errors /////////////////////////////////////////////////////////////////////
-
-/** The device answered with a status other than OK. `reply` is the reply payload when there was one. */
-export class DeviceError extends Error {
-  constructor(status, message, reply) {
-    super(message || STATUS_TEXT[status] || `Spotykach error ${status}.`);
-    this.name = "DeviceError";
-    this.status = status;
-    this.reply = reply || null;
-    /** For a frame the device rejected: one of FRAME_ERROR, otherwise null. */
-    this.frameError = null;
-  }
-}
-
-/** No (complete) reply in time. `detail` tells a silent device apart from bytes lost on the way. */
-export class TimeoutError extends Error {
-  constructor(detail) {
-    super("Spotykach didn't respond in time.");
-    this.name = "TimeoutError";
-    this.detail = detail;
-  }
-}
-
-/** First use on this computer: the serial port needs a grant, call `authorizePort()` from a click. */
-export class NeedsAuthorizationError extends Error {
-  constructor() {
-    super("Select Spotykach in the browser's port picker. This is needed only once per computer.");
-    this.name = "NeedsAuthorizationError";
-  }
-}
-
-/** No Spotykach USB MIDI port: not connected, or already in transfer mode without a granted serial port. */
-export class MidiPortNotFoundError extends Error {
-  constructor() {
-    super("Spotykach MIDI port not found. Is it connected through the rear USB-C port?" + portHint());
-    this.name = "MidiPortNotFoundError";
-  }
-}
-
-/** The device speaks another protocol major version. */
-export class ProtocolMismatchError extends Error {
-  constructor(major, minor) {
-    super(`Spotykach uses transfer protocol ${major}.${minor}, this app supports ${PROTO_MAJOR}.x. Update the app or the firmware.`);
-    this.name = "ProtocolMismatchError";
-    this.major = major;
-    this.minor = minor;
-  }
-}
-
-// Helpers ////////////////////////////////////////////////////////////////////
-
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
-const platform = () => (typeof navigator !== "undefined" && navigator.platform) || "";
-const isWindows = () => /Win/.test(platform());
-const isLinux = () => /Linux/.test(platform()) && !/Android/.test((typeof navigator !== "undefined" && navigator.userAgent) || "");
-const portHint = () => (isWindows() ? " On Windows, close other apps (e.g. your DAW) that use its MIDI port." : "");
 const slotArgs = (tape, slot) => new Uint8Array([tape, slot, 0, 0]);
 
-const CRC_TABLE = (() => {
-  const table = new Uint32Array(256);
-  for (let i = 0; i < 256; i++) {
-    let c = i;
-    for (let k = 0; k < 8; k++) c = (c & 1) ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
-    table[i] = c >>> 0;
-  }
-  return table;
-})();
-
-/** CRC-32 (IEEE 802.3, same as zlib). Pass the previous result as `crc` to continue over more data. */
-export function crc32(data, crc = 0) {
-  crc = ~crc >>> 0;
-  for (let i = 0; i < data.length; i++) crc = CRC_TABLE[(crc ^ data[i]) & 0xff] ^ (crc >>> 8);
-  return ~crc >>> 0;
+function parseHello(p) {
+  const dv = new DataView(p.buffer, p.byteOffset, p.byteLength);
+  const decoder = new TextDecoder();
+  return {
+    protoMajor: p[1],
+    protoMinor: p[2],
+    tapes: p[3],
+    slots: p[4],
+    tapeNames: decoder.decode(p.subarray(5, 11)),
+    maxChunk: dv.getUint32(14, true),
+    maxFrames: dv.getUint32(18, true),
+    maxCues: dv.getUint16(22, true),
+    totalKiB: dv.getUint32(26, true),
+    freeKiB: dv.getUint32(30, true),
+    firmware: decoder.decode(p.subarray(35, 35 + p[34])),
+  };
 }
-
-/*
-Downloads: DOWNLOAD_READ names an absolute offset and length, so it can be repeated.
-On macOS the serial tty can drop the tail of a large burst when the browser doesn't
-drain it fast enough, so the read size adapts: halve on a lost reply and stay below
-the size that failed; try that size again only after a long run of clean reads.
-*/
-const MIN_READ_CHUNK = 1024;
-const GROW_AFTER = 8;
-const PROBE_AFTER = 64;
-const MAX_READ_FAILURES_IN_ROW = 8;
-const READ_CHUNK_KEY = "spotykach.readChunk";
-
-/*
-Uploads: a chunk is resent after a corrupted frame or a lost reply. The device only
-advances after writing a chunk and reports its offset with every UPLOAD_DATA reply,
-so BAD_OFFSET on a resend tells whether the chunk was written already.
-*/
-const MAX_UPLOAD_RETRIES = 5;
-const UPLOAD_DATA_TIMEOUT_MS = 4000; // well below the device's 10 s idle timeout
-const DEVICE_QUIET_MS = 250;         // the device drops a broken frame's rest until 100 ms of quiet
-
-const KEEP_ALIVE_MS = 2000;
-
-function loadReadChunk(maxChunk) {
-  try {
-    const saved = parseInt(globalThis.window?.localStorage?.getItem(READ_CHUNK_KEY) ?? "", 10);
-    if (saved >= MIN_READ_CHUNK) return Math.min(saved, maxChunk);
-  } catch (e) { /* storage blocked */ }
-  return maxChunk;
-}
-
-function saveReadChunk(chunk) {
-  try {
-    globalThis.window?.localStorage?.setItem(READ_CHUNK_KEY, String(chunk));
-  } catch (e) { /* storage blocked */ }
-}
-
-/**
- * `e` with `detail` appended to its message. The serial port's own errors are
- * DOMExceptions, whose message can't be set: those come back wrapped, as `cause`.
- */
-function withDetail(e, detail) {
-  try {
-    e.message += ` (${detail})`;
-    return e;
-  } catch (_) {
-    return new Error(`${e.message} (${detail})`, { cause: e });
-  }
-}
-
-const isRetriable = e => e instanceof TimeoutError || (e instanceof DeviceError && e.status === STATUS.badFrame);
 
 // Link ///////////////////////////////////////////////////////////////////////
 
@@ -239,252 +137,19 @@ const isRetriable = e => e instanceof TimeoutError || (e instanceof DeviceError 
  * (an upload, a download, HELLO which resets the device session) also run one
  * at a time, through `exclusive()`.
  */
-export class SkLink {
+export class SkLink extends Link {
   /** Use `SkLink.open(port)`. */
-  constructor(port) {
-    this.port = port;
-    /** Called once when the connection is lost; not on `close()` / `exit()`. */
-    this.onclose = null;
-    this.closed = false;
-    /** The last HELLO result. */
-    this.info = null;
-
-    this._rx = new Uint8Array(0);
-    this._lastRxMs = 0;
-    this._lastTxMs = 0;
-    this._seq = 0;
-    this._pending = null;
-    this._requestLock = Promise.resolve();
-    this._opLock = Promise.resolve();
-    this._ops = 0;
-    this._reader = null;
-    this._writer = null;
-    this._keepAlive = null;
-    this._onSerialDisconnect = e => {
-      if (e.target === this.port) this._shutdown(new Error("Spotykach disconnected."));
-    };
-  }
-
-  /** Opens the port, retrying while the device is still enumerating. Doesn't talk to it yet. */
-  static async open(port) {
-    const link = new SkLink(port);
-    for (let attempt = 0; ; attempt++) {
-      try {
-        await port.open({ baudRate: 115200, bufferSize: 65536 });
-        break;
-      } catch (e) {
-        if (attempt >= 7) {
-          throw new Error("Can't open the Spotykach serial port. Is another tab or app using it?"
-            + (isLinux() ? " On Linux, add your user to the 'dialout' group (or 'uucp' on Arch) and log in again." : ""),
-          { cause: e });
-        }
-        await sleep(250);
-      }
-    }
-    link._writer = port.writable.getWriter();
-    link._reader = port.readable.getReader();
-    globalThis.navigator?.serial?.addEventListener?.("disconnect", link._onSerialDisconnect);
-    link._readLoop();
-    return link;
-  }
-
-  // Frames ///////////////////////////////////////////////////////////////////
-
-  async _readLoop() {
-    try {
-      while (this._reader) {
-        const { value, done } = await this._reader.read();
-        if (done) break;
-        if (value && value.length) this._append(value);
-      }
-    } catch (e) { /* device went away */ }
-    this._shutdown(new Error("Connection to Spotykach lost."));
-  }
-
-  _append(bytes) {
-    this._lastRxMs = now();
-    const merged = new Uint8Array(this._rx.length + bytes.length);
-    merged.set(this._rx);
-    merged.set(bytes, this._rx.length);
-    this._rx = merged;
-    while (this._rx.length >= HEADER_SIZE) {
-      // Bytes before a magic are dropped, which also resyncs after garbage
-      if (this._rx[0] !== MAGIC_0 || this._rx[1] !== MAGIC_1) { this._rx = this._rx.subarray(1); continue; }
-      const dv = new DataView(this._rx.buffer, this._rx.byteOffset);
-      const length = dv.getUint32(4, true);
-      if (length > MAX_PAYLOAD) { this._rx = this._rx.subarray(1); continue; }
-      if (this._rx.length < HEADER_SIZE + length) break;
-      const frame = this._rx.slice(0, HEADER_SIZE + length);
-      this._rx = this._rx.slice(HEADER_SIZE + length);
-      const crc = crc32(frame.subarray(HEADER_SIZE), crc32(frame.subarray(2, 8)));
-      if (crc !== dv.getUint32(8, true)) {
-        this._fail(new DeviceError(STATUS.badFrame, "A reply from Spotykach arrived corrupted. Please retry."));
-        continue;
-      }
-      this._deliver(frame[2], frame[3], frame.subarray(HEADER_SIZE));
-    }
-  }
-
-  _deliver(type, seq, payload) {
-    const pending = this._pending;
-    if (!pending) return;
-    if (type === FRAME_ERROR_TYPE) {
-      const reason = payload[1] ?? FRAME_ERROR.unknown;
-      const text = FRAME_ERROR_TEXT[reason];
-      const error = new DeviceError(payload[0] ?? STATUS.badFrame,
-        `Spotykach received a corrupted request${text ? ` (${text})` : ""}. Please retry.`, payload);
-      error.frameError = reason;
-      this._fail(error);
-      return;
-    }
-    if (type !== (pending.type | RESPONSE_FLAG) || seq !== pending.seq) return; // a late reply to an abandoned request
-    this._pending = null;
-    clearInterval(pending.timer);
-    pending.resolve(payload);
-  }
-
-  /** What had arrived when a request timed out. */
-  _rxState() {
-    const rx = this._rx;
-    if (rx.length < HEADER_SIZE) return `${rx.length} bytes pending`;
-    const dv = new DataView(rx.buffer, rx.byteOffset);
-    const aligned = rx[0] === MAGIC_0 && rx[1] === MAGIC_1;
-    return `${rx.length} of ${HEADER_SIZE + dv.getUint32(4, true)} bytes of a ${aligned ? "" : "misaligned "}frame type 0x${rx[2].toString(16)} seq ${rx[3]} pending`;
-  }
-
-  /** Drops partially received data before a retry. */
-  _resync() {
-    this._rx = new Uint8Array(0);
-  }
-
-  _fail(error) {
-    const pending = this._pending;
-    if (!pending) return;
-    this._pending = null;
-    clearInterval(pending.timer);
-    pending.reject(error);
-  }
-
-  _shutdown(error) {
-    if (this.closed) return;
-    this.closed = true;
-    this.stopKeepAlive();
-    globalThis.navigator?.serial?.removeEventListener?.("disconnect", this._onSerialDisconnect);
-    this._fail(error);
-    if (this.onclose) this.onclose(error);
-  }
-
-  /** Closes the port without telling the device; `exit()` does both. */
-  async close() {
-    this.closed = true;
-    this.stopKeepAlive();
-    globalThis.navigator?.serial?.removeEventListener?.("disconnect", this._onSerialDisconnect);
-    this._fail(new Error("Disconnected."));
-    const reader = this._reader;
-    this._reader = null;
-    try { await reader?.cancel(); } catch (e) { /* gone */ }
-    try { reader?.releaseLock(); } catch (e) { /* gone */ }
-    try { this._writer?.releaseLock(); } catch (e) { /* gone */ }
-    try { await this.port.close(); } catch (e) { /* gone */ }
+  constructor(port, device = DEVICE) {
+    super(port, device);
   }
 
   /**
-   * Sends one request and returns the reply payload (status byte included).
-   * Throws `DeviceError` for a status other than OK, `TimeoutError` without a reply.
-   * `stallMs`: give up early once a reply started arriving and then stopped.
+   * Opens the port, retrying while the device is still enumerating. Doesn't talk to it yet.
+   * `handshake` calls `open(port, device, { fresh })`: the options go on, so a port that
+   * just appeared gets the longer Linux wait.
    */
-  request(type, payload = new Uint8Array(0), timeout = 5000, stallMs = 0) {
-    const run = () => this._send(type, payload, timeout, stallMs);
-    const result = this._requestLock.then(run, run);
-    this._requestLock = result.catch(() => {});
-    return result;
-  }
-
-  async _send(type, payload, timeout, stallMs) {
-    if (this.closed || !this._writer) throw new Error("Not connected to Spotykach.");
-    this._seq = (this._seq + 1) & 0xff;
-    const seq = this._seq;
-    const frame = new Uint8Array(HEADER_SIZE + payload.length);
-    const dv = new DataView(frame.buffer);
-    frame[0] = MAGIC_0;
-    frame[1] = MAGIC_1;
-    frame[2] = type;
-    frame[3] = seq;
-    dv.setUint32(4, payload.length, true);
-    frame.set(payload, HEADER_SIZE);
-    dv.setUint32(8, crc32(payload, crc32(frame.subarray(2, 8))), true);
-
-    const response = new Promise((resolve, reject) => {
-      const start = now();
-      const timer = setInterval(() => {
-        const t = now();
-        const stalled = stallMs > 0 && this._rx.length > 0 && t - this._lastRxMs > stallMs;
-        if (stalled || t - start > timeout) {
-          this._fail(new TimeoutError(`request 0x${type.toString(16)} seq ${seq}: ${this._rxState()}`));
-        }
-      }, 50);
-      this._pending = { type, seq, resolve, reject, timer };
-    });
-    // The device can reject a frame before the write finishes; it's awaited below
-    response.catch(() => {});
-    this._lastTxMs = now();
-    await this._writer.write(frame);
-    const reply = await response;
-    if (reply[0] !== STATUS.ok) throw new DeviceError(reply[0], undefined, reply);
-    return reply;
-  }
-
-  /** Runs `work` with no other operation in between, e.g. a whole upload. */
-  exclusive(work) {
-    const run = async () => {
-      this._ops++;
-      try {
-        return await work();
-      } finally {
-        this._ops--;
-      }
-    };
-    const result = this._opLock.then(run, run);
-    this._opLock = result.catch(() => {});
-    return result;
-  }
-
-  /** PINGs while nothing else talks: the device leaves transfer mode after 10 s without a frame. */
-  startKeepAlive() {
-    this.stopKeepAlive();
-    this._keepAlive = setInterval(() => {
-      if (this.closed || this._ops > 0 || this._pending) return;
-      if (now() - this._lastTxMs < KEEP_ALIVE_MS) return;
-      this.request(CMD.ping).catch(() => {});
-    }, 500);
-  }
-
-  stopKeepAlive() {
-    if (this._keepAlive) clearInterval(this._keepAlive);
-    this._keepAlive = null;
-  }
-
-  // Commands /////////////////////////////////////////////////////////////////
-
-  /** Device and card info. Also resets the device session, so it never runs inside another operation. */
-  async hello() {
-    const p = await this.exclusive(() => this.request(CMD.hello));
-    const dv = new DataView(p.buffer, p.byteOffset, p.byteLength);
-    const decoder = new TextDecoder();
-    this.info = {
-      protoMajor: p[1],
-      protoMinor: p[2],
-      tapes: p[3],
-      slots: p[4],
-      tapeNames: decoder.decode(p.subarray(5, 11)),
-      maxChunk: dv.getUint32(14, true),
-      maxFrames: dv.getUint32(18, true),
-      maxCues: dv.getUint16(22, true),
-      totalKiB: dv.getUint32(26, true),
-      freeKiB: dv.getUint32(30, true),
-      firmware: decoder.decode(p.subarray(35, 35 + p[34])),
-    };
-    return this.info;
+  static open(port, _device, options) {
+    return super.open(port, DEVICE, options);
   }
 
   /** All slots, empty ones included (flag SLOT_OCCUPIED clear). */
@@ -560,26 +225,9 @@ export class SkLink {
     });
   }
 
-  async _sendChunk(payload, offset, length) {
-    for (let attempt = 1; ; attempt++) {
-      try {
-        await this.request(CMD.uploadData, payload, UPLOAD_DATA_TIMEOUT_MS);
-        return;
-      } catch (e) {
-        const reply = e instanceof DeviceError ? e.reply : null;
-        const deviceOffset = reply && reply.length >= 8 ? new DataView(reply.buffer, reply.byteOffset).getUint32(4, true) : -1;
-        const isResendOffset = attempt > 1 && e instanceof DeviceError && e.status === STATUS.badOffset;
-        if (isResendOffset && deviceOffset === offset + length) return; // written, only the reply was lost
-        const retriable = isRetriable(e) || (isResendOffset && deviceOffset === offset);
-        const detail = `upload at byte ${offset}, attempt ${attempt}: ${e.detail || e.message}`;
-        console.warn(`[spotykach] ${detail}`);
-        if (!retriable || this.closed || attempt > MAX_UPLOAD_RETRIES) {
-          throw withDetail(e, detail);
-        }
-        await sleep(DEVICE_QUIET_MS);
-        this._resync();
-      }
-    }
+  /** One UPLOAD_DATA, a chunked write with retries (Link.writeChunk). */
+  _sendChunk(payload, offset, length) {
+    return this.writeChunk(CMD.uploadData, payload, offset, length);
   }
 
   /**
@@ -613,56 +261,9 @@ export class SkLink {
     return this.readSlot(tape, slot, (size, read) => read(0, size, options));
   }
 
-  async _readRange(start, length, maxChunk, options = {}) {
-    const { onProgress, signal } = options;
-    const out = new Uint8Array(length);
-    let chunk = loadReadChunk(maxChunk);
-    let ceiling = chunk; // largest read size not known to fail
-    let clean = 0;
-    let failures = 0;
-    let failuresInRow = 0;
-    for (let done = 0; done < length;) {
-      signal?.throwIfAborted();
-      const size = Math.min(chunk, length - done);
-      const args = new Uint8Array(8);
-      const dv = new DataView(args.buffer);
-      dv.setUint32(0, start + done, true);
-      dv.setUint32(4, size, true);
-      let p;
-      try {
-        p = await this.request(CMD.downloadRead, args, 1500, 300);
-      } catch (e) {
-        const detail = `read at byte ${start + done}, ${size} bytes: ${e.detail || e.message}`;
-        console.warn(`[spotykach] ${detail}`);
-        failures++;
-        if (!isRetriable(e) || this.closed || ++failuresInRow > MAX_READ_FAILURES_IN_ROW) {
-          throw withDetail(e, detail);
-        }
-        this._resync();
-        ceiling = Math.max(MIN_READ_CHUNK, chunk >> 1);
-        chunk = ceiling;
-        clean = 0;
-        continue;
-      }
-      out.set(p.subarray(4, 4 + size), done);
-      done += size;
-      onProgress?.(done / length);
-      failuresInRow = 0;
-      clean++;
-      if (chunk < ceiling && clean >= GROW_AFTER) {
-        chunk = Math.min(ceiling, chunk << 1);
-        clean = 0;
-      }
-      else if (chunk === ceiling && ceiling < maxChunk && clean >= PROBE_AFTER) {
-        ceiling = Math.min(maxChunk, ceiling << 1);
-        chunk = ceiling;
-        clean = 0;
-      }
-    }
-    // Small reads (e.g. headers) say nothing about the size that works
-    if (length >= maxChunk) saveReadChunk(ceiling);
-    if (failures) console.info(`[spotykach] ${failures} lost replies, finished with ${chunk} byte reads`);
-    return out;
+  /** DOWNLOAD_READs, ranged reads with an adapting size (Link.readRange). */
+  _readRange(start, length, maxChunk, options = {}) {
+    return this.readRange(CMD.downloadRead, start, length, maxChunk, options);
   }
 
   async remove(tape, slot) {
@@ -734,17 +335,31 @@ export class SkLink {
       await this.request(CMD.fileWrite, payload, 10000);
     });
   }
-
-  /** Back to USB MIDI and closes the port. Best effort: the device also leaves after 10 s of silence. */
-  async exit() {
-    this.stopKeepAlive();
-    if (!this.closed) {
-      try { await this.request(CMD.exit, undefined, 1000); } catch (e) { /* the timeout takes over */ }
-    }
-    this.onclose = null;
-    await this.close();
-  }
 }
+
+/** Spotykach as @synthuxacademy/usb-transfer sees it. */
+export const DEVICE = defineDevice({
+  name: "Spotykach",
+  magic: "SK",
+  protoMajor: PROTO_MAJOR,
+  usbVendorId: USB_VENDOR_ID,
+  usbProductId: USB_PRODUCT_ID,
+  midiPortName: /spotykach/i,
+  connectHint: "Is it connected through the rear USB-C port?",
+  maxPayload: MAX_PAYLOAD,
+  statusText: STATUS_TEXT,
+  enterText: {
+    1: "Spotykach is busy (loading, saving or recording). Finish that and try again.",
+    2: "No SD card found in Spotykach.",
+  },
+  // Mounting the card can take ~600 ms before the device replies
+  enterReplyMs: [2000, 3000],
+  badOffsetStatus: STATUS.badOffset,
+  parseHello,
+  storageKey: "spotykach",
+  logTag: "spotykach",
+  Link: SkLink,
+});
 
 // Files //////////////////////////////////////////////////////////////////////
 
@@ -858,163 +473,22 @@ export function formatConfig(values, text = null) {
 
 // Connecting /////////////////////////////////////////////////////////////////
 
-/** Web Serial and Web MIDI are both needed (Chromium-based browsers on desktop). */
-export function isSupported() {
-  return typeof navigator !== "undefined" && "serial" in navigator && "requestMIDIAccess" in navigator;
-}
-
 /** The serial port this browser already has permission for, present while the device is in transfer mode. */
-export async function grantedPort() {
-  const ports = (await globalThis.navigator?.serial?.getPorts()) ?? [];
-  return ports.find(port => {
-    const info = port.getInfo();
-    return info.usbVendorId === USB_VENDOR_ID && info.usbProductId === USB_PRODUCT_ID;
-  }) ?? null;
-}
-
-async function waitForPort(timeoutMs) {
-  const start = now();
-  while (now() - start < timeoutMs) {
-    const port = await grantedPort();
-    if (port) return port;
-    await sleep(250);
-  }
-  return null;
-}
-
-const ENTER_TEXT = {
-  1: "Spotykach is busy (loading, saving or recording). Finish that and try again.",
-  2: "No SD card found in Spotykach.",
-};
-
-// Web MIDI's calls have no time limit of their own; on some Windows machines they never settle
-const MIDI_ACCESS_MS = 8000;
-const MIDI_OPEN_MS = 5000;
-
-function within(promise, ms, message, onTimeout) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { onTimeout?.(); reject(new Error(message)); }, ms);
-    promise.then(resolve, reject).finally(() => clearTimeout(timer));
-  });
-}
-
-async function midiPermission() {
-  try {
-    return (await navigator.permissions.query({ name: "midi", sysex: true })).state;
-  } catch (_) {
-    return "unknown";
-  }
+export function grantedPort() {
+  return baseGrantedPort(DEVICE);
 }
 
 /**
  * Asks the device over USB MIDI to switch to transfer mode and waits for its reply.
- * Both MIDI ports are opened before sending so the reply can't be missed; the
- * request is sent twice at most. A MIDI port that disappears meanwhile means the
- * device switched and only its reply got lost.
  * `onStep` gets a line for each step, for diagnostics.
  */
-export async function enterTransferMode({ onStep = () => {} } = {}) {
-  const permission = await midiPermission();
-  onStep(`MIDI permission: ${permission}`);
-  const asked = now();
-  const after = () => `after ${((now() - asked) / 1000).toFixed(1)} s`;
-  const request = navigator.requestMIDIAccess({ sysex: true }).catch(e => {
-    throw new Error("MIDI access was denied. Spotykach is switched to transfer mode through MIDI SysEx, please allow it.", { cause: e });
-  });
-  // A permission prompt waits on the user, so no time limit then
-  const access = permission === "prompt" ? await request : await within(request, MIDI_ACCESS_MS,
-    `The browser didn't give access to MIDI within ${MIDI_ACCESS_MS / 1000} s. Close other apps and tabs that use MIDI, or try another Chromium-based browser.`,
-    // Tells a slow MIDI access from one that never comes
-    () => request.then(() => onStep(`MIDI access came late, ${after()}`), e => onStep(`MIDI access failed late, ${after()}: ${e.cause?.message}`)));
-  const ports = [...access.inputs.values(), ...access.outputs.values()];
-  onStep(`MIDI ports: ${ports.map(p => `${p.type} "${p.name}" (${p.state})`).join(", ") || "none"}`);
-  const isSpotykach = port => /spotykach/i.test(port.name || "");
-  const output = [...access.outputs.values()].find(isSpotykach);
-  const inputs = [...access.inputs.values()].filter(isSpotykach);
-  if (!output) throw new MidiPortNotFoundError();
-
-  // Ports left open while the device leaves USB can wedge Chrome's MIDI service on Windows
-  // until the browser quits, so they're closed as soon as the reply is in, and on every exit
-  let closed = false;
-  const closePorts = () => {
-    if (closed) return;
-    closed = true;
-    for (const port of [output, ...inputs]) {
-      port.onmidimessage = null;
-      Promise.resolve(port.close?.()).catch(() => {});
-    }
-  };
-
-  try {
-    await within(Promise.all([output.open(), ...inputs.map(input => input.open())]), MIDI_OPEN_MS,
-      `The MIDI port didn't open within ${MIDI_OPEN_MS / 1000} s.`);
-  } catch (e) {
-    closePorts();
-    throw new Error("Can't open the Spotykach MIDI port." + portHint(), { cause: e });
-  }
-
-  let status = null;
-  let onReply = () => {};
-  const isReply = d => d && d.length === 7 && SYSEX_REPLY_PREFIX.every((b, i) => d[i] === b) && d[6] === 0xF7;
-  for (const input of inputs) {
-    input.onmidimessage = e => {
-      if (!isReply(e.data)) return;
-      status = e.data[5];
-      closePorts();
-      onReply();
-    };
-  }
-  const switched = () => {
-    if (output.state !== "disconnected") return false;
-    onStep("the MIDI port is gone: the device switched");
-    return true;
-  };
-
-  try {
-    for (let attempt = 0; attempt < 2 && status === null; attempt++) {
-      if (switched()) return;
-      try {
-        onStep(`sending SysEx: enter transfer mode${attempt ? ", again" : ""}`);
-        output.send(SYSEX_ENTER);
-      } catch (e) {
-        if (switched()) return;
-        throw new Error("Can't send to the Spotykach MIDI port." + portHint(), { cause: e });
-      }
-      // Mounting the card can take ~600 ms before the device replies
-      await new Promise(resolve => {
-        const timer = setTimeout(resolve, attempt === 0 ? 2000 : 3000);
-        onReply = () => { clearTimeout(timer); resolve(); };
-      });
-    }
-  } finally {
-    closePorts();
-  }
-
-  if (status === null) {
-    if (switched()) return;
-    throw new Error("Spotykach didn't respond. Its firmware may not support USB transfer." + portHint());
-  }
-  onStep(`reply: ${status === 0 ? "OK" : status}`);
-  if (status !== 0) throw new Error(ENTER_TEXT[status] || `Spotykach refused transfer mode (${status}).`);
+export function enterTransferMode(options = {}) {
+  return baseEnterTransferMode(DEVICE, options);
 }
 
 /** Opens the port and checks HELLO. Resolves to `{ link, info }`, with the keep-alive running. */
-export async function handshake(port, { onStep = () => {} } = {}) {
-  onStep("opening the serial port and sending HELLO");
-  const link = await SkLink.open(port);
-  try {
-    const info = await link.hello();
-    onStep(`HELLO: firmware ${info.firmware}, protocol ${info.protoMajor}.${info.protoMinor}`);
-    if (info.protoMajor !== PROTO_MAJOR) {
-      await link.exit();
-      throw new ProtocolMismatchError(info.protoMajor, info.protoMinor);
-    }
-    link.startKeepAlive();
-    return { link, info };
-  } catch (e) {
-    await link.close();
-    throw e;
-  }
+export function handshake(port, options = {}) {
+  return baseHandshake(DEVICE, port, options);
 }
 
 /**
@@ -1024,46 +498,13 @@ export async function handshake(port, { onStep = () => {} } = {}) {
  * `NeedsAuthorizationError`: call `authorizePort()` from a fresh click.
  * `onStep` gets a line for each step, for diagnostics.
  */
-export async function connect({ onStep = () => {} } = {}) {
-  if (!isSupported()) {
-    throw new Error("USB transfer needs Web Serial and Web MIDI. Please use a Chromium-based browser (Chrome, Edge, Opera) on macOS, Windows or Linux.");
-  }
-
-  const existing = await grantedPort();
-  onStep(existing ? "serial port already granted to this site" : "no serial port granted to this site yet");
-  if (existing) {
-    try {
-      return await handshake(existing, { onStep });
-    } catch (e) {
-      if (e instanceof ProtocolMismatchError) throw e;
-      // A stale grant, the device isn't in transfer mode: switch it
-      onStep(`no answer on the granted port: ${e.message}`);
-    }
-  }
-
-  try {
-    await enterTransferMode({ onStep });
-  } catch (e) {
-    // Maybe already in transfer mode with a port this browser hasn't been granted yet
-    if (e instanceof MidiPortNotFoundError && navigator.userActivation?.isActive) {
-      try { return await authorizePort({ onStep }); } catch (_) { throw e; }
-    }
-    throw e;
-  }
-
-  onStep("waiting for the serial port");
-  const port = await waitForPort(2500);
-  if (port) return handshake(port, { onStep });
-  // The click that started this still counts as a user gesture for about 5 s
-  if (navigator.userActivation?.isActive) return authorizePort({ onStep });
-  throw new NeedsAuthorizationError();
+export function connect(options = {}) {
+  return baseConnect(DEVICE, options);
 }
 
 /** Shows the browser's port picker, so it must run from a click. The device waits up to 60 s for it. */
-export async function authorizePort({ onStep = () => {} } = {}) {
-  onStep("showing the port picker");
-  const port = await navigator.serial.requestPort({ filters: [{ usbVendorId: USB_VENDOR_ID, usbProductId: USB_PRODUCT_ID }] });
-  return handshake(port, { onStep });
+export function authorizePort(options = {}) {
+  return baseAuthorizePort(DEVICE, options);
 }
 
 // WAV ////////////////////////////////////////////////////////////////////////

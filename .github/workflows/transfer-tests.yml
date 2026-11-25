@@ -1,7 +1,8 @@
 name: Transfer protocol tests
 
 # The firmware's transfer code built for the host, with @synthuxacademy/spotykach-transfer
-# run against it, so both sides of the protocol stay in sync.
+# run against it, so both sides of the protocol stay in sync. The shared part comes from
+# the lib/usb-transfer submodule.
 on:
   push:
     paths:
@@ -11,6 +12,7 @@ on:
       - src/memory/slots.*
       - src/core/config.*
       - web/spotykach-transfer/**
+      - lib/usb-transfer
       - tests/transfer/**
       - .github/workflows/transfer-tests.yml
   pull_request:
@@ -21,6 +23,7 @@ on:
       - src/memory/slots.*
       - src/core/config.*
       - web/spotykach-transfer/**
+      - lib/usb-transfer
       - tests/transfer/**
       - .github/workflows/transfer-tests.yml
   workflow_call:
@@ -31,6 +34,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Only the shared protocol code; libDaisy isn't needed for the host build
+      - run: git submodule update --init lib/usb-transfer
       - uses: actions/setup-node@v4
         with:
           node-version: 22

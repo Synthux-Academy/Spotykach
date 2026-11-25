@@ -1,13 +1,13 @@
 // Types for @synthuxacademy/spotykach-transfer.
 
-/** The parts of a Web Serial `SerialPort` the link uses; a real SerialPort fits. */
-export interface SerialPortLike {
-  open(options: { baudRate: number; bufferSize?: number }): Promise<void>;
-  close(): Promise<void>;
-  readonly readable: ReadableStream<Uint8Array> | null;
-  readonly writable: WritableStream<Uint8Array> | null;
-  getInfo(): { usbVendorId?: number; usbProductId?: number };
-}
+import { SerialPortLike, Link, Device, OpenOptions } from "@synthuxacademy/usb-transfer";
+
+export type { SerialPortLike } from "@synthuxacademy/usb-transfer";
+/** The shared protocol's errors and helpers, re-exported. */
+export {
+  DeviceError, TimeoutError, NeedsAuthorizationError, MidiPortNotFoundError, ProtocolMismatchError,
+  FRAME_ERROR, crc32, isSupported,
+} from "@synthuxacademy/usb-transfer";
 
 export declare const USB_VENDOR_ID: number;
 export declare const USB_PRODUCT_ID: number;
@@ -29,8 +29,6 @@ export declare const STATUS: Readonly<{
 /** English messages, index = status code. */
 export declare const STATUS_TEXT: readonly string[];
 
-/** Why the device rejected a frame, see `DeviceError.frameError`. */
-export declare const FRAME_ERROR: Readonly<{ unknown: 0; crc: 1; stale: 2; overflow: 3; badLength: 4 }>;
 /** DOWNLOAD_READ offsets must be multiples of this; `readSlot` ranges are aligned for you. */
 export declare const SECTOR_SIZE: number;
 
@@ -39,27 +37,6 @@ export declare const SLOT_LOADABLE: number;
 export declare const SLOT_PARSED: number;
 
 export declare const DEVICE_FORMAT: Readonly<{ sampleRate: 48000; channels: 2; bitsPerSample: 32; audioFormat: 3 }>;
-
-export declare class DeviceError extends Error {
-  constructor(status: number, message?: string, reply?: Uint8Array);
-  readonly status: number;
-  /** The reply payload, status byte first, when the device sent one. */
-  readonly reply: Uint8Array | null;
-  /** For a frame the device rejected (status badFrame): one of FRAME_ERROR, otherwise null. */
-  readonly frameError: number | null;
-}
-export declare class TimeoutError extends Error {
-  /** What had arrived when the request gave up. */
-  readonly detail: string;
-}
-export declare class NeedsAuthorizationError extends Error {}
-export declare class MidiPortNotFoundError extends Error {}
-export declare class ProtocolMismatchError extends Error {
-  readonly major: number;
-  readonly minor: number;
-}
-
-export declare function crc32(data: Uint8Array, crc?: number): number;
 
 export interface DeviceInfo {
   protoMajor: number;
@@ -103,23 +80,11 @@ export interface TransferOptions {
 
 export type RangeReader = (offset: number, length: number, options?: TransferOptions) => Promise<Uint8Array>;
 
-export declare class SkLink {
-  static open(port: SerialPortLike): Promise<SkLink>;
-  readonly port: SerialPortLike;
-  /** Called once when the connection is lost; not on `close()` / `exit()`. */
-  onclose: ((error: Error) => void) | null;
-  closed: boolean;
-  /** The last HELLO result. */
-  info: DeviceInfo | null;
+/** Request, keep-alive, hello, exit and close come from the shared `Link`. */
+export declare class SkLink extends Link<DeviceInfo> {
+  constructor(port: SerialPortLike, device?: Device<DeviceInfo>);
+  static open(port: SerialPortLike, device?: Device<any>, options?: OpenOptions): Promise<SkLink>;
 
-  /** One request; resolves to the reply payload (status byte first). */
-  request(type: number, payload?: Uint8Array, timeout?: number, stallMs?: number): Promise<Uint8Array>;
-  /** Runs `work` with no other operation in between. */
-  exclusive<T>(work: () => Promise<T>): Promise<T>;
-  startKeepAlive(): void;
-  stopKeepAlive(): void;
-
-  hello(): Promise<DeviceInfo>;
   list(): Promise<SlotEntry[]>;
   /** Requires `hello()` first. Checks the file with `checkUploadable` before sending. */
   upload(tape: number, slot: number, bytes: Uint8Array, options?: TransferOptions): Promise<void>;
@@ -140,18 +105,16 @@ export declare class SkLink {
   readFile(name: string): Promise<string | null>;
   /** Creates or replaces a small text file (`isFileName`), at most `MAX_FILE_SIZE` bytes. Requires `hello()` first. */
   writeFile(name: string, text: string): Promise<void>;
-  /** Back to USB MIDI, then closes the port. */
-  exit(): Promise<void>;
-  /** Closes the port without telling the device. */
-  close(): Promise<void>;
 }
+
+/** Spotykach as @synthuxacademy/usb-transfer sees it. */
+export declare const DEVICE: Device<DeviceInfo>;
 
 export interface Connection {
   link: SkLink;
   info: DeviceInfo;
 }
 
-export declare function isSupported(): boolean;
 export declare function grantedPort(): Promise<SerialPortLike | null>;
 /** `onStep` gets a line for each connection step, for diagnostics. */
 export interface ConnectOptions {

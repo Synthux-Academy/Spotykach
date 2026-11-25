@@ -1,7 +1,7 @@
 // Switching to transfer mode over a fake Web MIDI, with mocked timers. Run through run.sh.
 import { test, mock, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { enterTransferMode, MidiPortNotFoundError } from "../../web/spotykach-transfer/index.js";
+import { enterTransferMode, MidiPortNotFoundError, DEVICE, SkLink } from "../../web/spotykach-transfer/index.js";
 
 const never = new Promise(() => {});
 const flush = () => new Promise(setImmediate);
@@ -119,4 +119,36 @@ test("a MIDI access that comes after the time limit is reported", async () => {
   grant(midiAccess([]));
   await flush();
   assert.match(steps.at(-1), /^MIDI access came late, after \d+\.\d s$/);
+});
+
+// Opens a port that stays busy for `busyMs` the way `handshake` does, through DEVICE.Link,
+// with mocked timers; resolves to the link or the error.
+async function openBusy(busyMs, options) {
+  let elapsed = 0;
+  const port = {
+    async open() { if (elapsed < busyMs) throw new Error("busy"); },
+    async close() {},
+    readable: { getReader: () => ({ read: () => never, async cancel() {}, releaseLock() {} }) },
+    writable: { getWriter: () => ({ async write() {}, async close() {}, releaseLock() {} }) },
+  };
+  let result = null;
+  const done = DEVICE.Link.open(port, DEVICE, options).then(link => (result = link), e => (result = e));
+  while (!result) {
+    await flush();
+    mock.timers.tick(250);
+    elapsed += 250;
+  }
+  await done;
+  return result;
+}
+
+test("on Linux SkLink passes fresh on: a port that just appeared gets about 6 s to open", async () => {
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true, value: { platform: "Linux x86_64", userAgent: "Mozilla/5.0 (X11; Linux x86_64)" },
+  });
+  const fresh = await openBusy(4000, { fresh: true });
+  assert.ok(fresh instanceof SkLink, String(fresh));
+  await fresh.close();
+  const granted = await openBusy(4000);
+  assert.match(granted.message, /Can't open the Spotykach serial port/);
 });
